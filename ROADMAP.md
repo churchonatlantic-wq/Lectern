@@ -31,26 +31,13 @@ Plan for building: one item at a time on a branch, each checked in a test build,
 - Input audio is received with the video.
 - Each input's audio has its own on/off and volume, separate from whether the input is on screen.
 
-## 5. Screen roles
-
-- Each monitor connected to the PC gets a role chosen in Lectern:
-  - **Program dashboard**: the control window.
-  - **Multiview**: live, up next and the outputs side by side.
-  - **Stage/confidence**: what the people on stage see.
-  - **Full-screen output**: any of the six outputs.
-- Each output card has a clear menu to send it to a connected screen (listed by name), to NDI, to both, or turn it off, with its status visible at a glance.
-- The stage/confidence screen has its own layout editor:
-  - Choose what each box shows: current slide, next slide, clock, timer, stage message or service order.
-  - Drag and resize each box and set its text size.
-  - The layout is saved.
-
-## 6. Dante audio
+## 5. Dante audio
 
 - The presentation PC has **Dante Via** installed.
 - Each output gets an audio device choice, plus a main audio setting, so sound can go to Dante Via or any other device.
 - Dante Via picks up Lectern's audio from the device it is set to capture. No Dante developer kit is needed.
 
-## 7. Playback speed for videos
+## 6. Playback speed for videos
 
 - In each video's options menu in the media panel, not under the Live monitor:
   - Speed from 0.5× to 2×. The default is always 100%.
@@ -59,7 +46,7 @@ Plan for building: one item at a time on a branch, each checked in a test build,
 - Changing the speed while the video is live takes effect straight away.
 - The speed is saved with the video in the service.
 
-## 8. Claude control bridge
+## 7. Claude control bridge
 
 Control changes such as font size, importing files and backgrounds by asking Claude. Both options below are planned, and they share one set of Lectern controls so they behave the same way.
 

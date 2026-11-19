@@ -101,7 +101,8 @@
       },
       "files": [
         "!node_modules/koffi/build/koffi/{win32,linux,freebsd,openbsd,musl}*/**"
-      ]
+      ],
+      "x64ArchFiles": "**/node_modules/koffi/**"
     },
     "afterPack": "build/afterPack.js"
   }

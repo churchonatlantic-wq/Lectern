@@ -8,14 +8,14 @@ Worship presentation software for Windows and macOS with **six independent outpu
 |---|---|---|
 | Windows 10/11 (64-bit) | `Lectern-Setup-1.0.0.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
 | Windows (portable) | `Lectern-1.0.0-win.zip` | Unzip anywhere and run `Lectern.exe`. |
-| Mac with Apple Silicon (M1 and later) | `Lectern-1.0.0-mac-apple-silicon.zip` | See "First run on a Mac" below. |
-| Mac with Intel | `Lectern-1.0.0-mac-intel.zip` | See "First run on a Mac" below. |
+| Mac (Apple Silicon and Intel) | `Lectern-1.0.0-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
+| Mac (zip) | `Lectern-1.0.0-universal-mac.zip` | Same app as the DMG, zipped. |
 
 **NDI:** install the free [NDI Tools](https://ndi.video/tools/) (or the NDI 6 Runtime) on the presentation computer. Lectern finds the NDI library automatically. If it is somewhere unusual, set its location under Settings → NDI. Without NDI, screen outputs and previews still work, and a banner explains what's missing.
 
 ### First run on a Mac
 
-These builds are not signed with an Apple Developer ID. Unzip, drag `Lectern.app` to Applications, then run this once in Terminal:
+These builds are not signed with an Apple Developer ID. Open the DMG (or unzip the zip), drag `Lectern.app` to Applications, then run this once in Terminal:
 
 ```bash
 xattr -cr /Applications/Lectern.app && codesign --force --deep --sign - /Applications/Lectern.app
@@ -69,7 +69,7 @@ npm start
 - Windows installer, on Windows: `npm run dist:win`.
 - Universal, signed DMG, on a Mac: `npm run dist:mac`. Set `CSC_LINK`/`CSC_KEY_PASSWORD` to sign, and `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` to notarize.
 - Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.0.0.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
-- CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag.
+- CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`.
 
 ### NDI loopback test
 

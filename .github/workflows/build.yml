@@ -25,7 +25,10 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Build macOS
         if: runner.os == 'macOS'
-        run: npm run dist:mac -- --publish never
+        run: |
+          # No certificate saved: drop the empty signing variables, or electron-builder treats "" as a path.
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; fi
+          npm run dist:mac -- --publish never
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}

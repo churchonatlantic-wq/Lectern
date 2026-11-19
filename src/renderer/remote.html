@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lectern Remote</title>
+<style>
+  :root { color-scheme: dark; --bg:#0e1116; --panel:#151a21; --line:#262e39; --fg:#e6e9ee; --muted:#8b95a5; --accent:#f0b44c; --live:#e5484d; --cue:#3fb871; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  button, input { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .wrap { display: grid; gap: 12px; max-width: 640px; margin: 0 auto; }
+  .now { border-left: 4px solid var(--live); white-space: pre-wrap; font-size: 18px; font-weight: 600; min-height: 3.2em; }
+  .nxt { border-left: 4px solid var(--cue); white-space: pre-wrap; color: #ffd27a; }
+  .nav { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+  .nav button { padding: 22px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); font-size: 18px; font-weight: 700; }
+  .nav .go { background: var(--accent); color: #1b1306; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 10px 14px; font-weight: 600; }
+  .btn.red { background: var(--live); border-color: var(--live); color: #fff; }
+  .items { display: grid; gap: 6px; }
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  summary { padding: 10px 12px; cursor: pointer; font-weight: 600; }
+  details.live summary::after { content: " ● live"; color: var(--live); font-size: 12px; }
+  .slides { display: grid; gap: 4px; padding: 0 8px 8px; }
+  .slides button { text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 8px; border-left-width: 4px; font-size: 13px; white-space: pre-wrap; }
+  .slides button.on { outline: 2px solid var(--live); }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .err { color: #ff8a8d; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="login" class="card" hidden>
+    <p class="lbl">Lectern remote</p>
+    <p>Enter the PIN shown in Lectern under Settings → Phone remote.</p>
+    <div class="row"><input id="pin" inputmode="numeric" autocomplete="off" aria-label="PIN"><button class="btn" id="pinGo">Connect</button></div>
+    <p class="err" id="loginErr"></p>
+  </div>
+  <div id="app" hidden>
+    <div class="wrap">
+      <div class="top"><b id="svc"></b><span class="lbl" id="timer"></span></div>
+      <div class="card now" id="now"></div>
+      <div class="card nxt" id="nxt"></div>
+      <div class="nav"><button id="prev">◀ Back</button><button class="go" id="next">Next ▶</button></div>
+      <div class="row"><button class="btn red" id="clear">Clear all</button><button class="btn" id="slideToggle">Slide on/off</button></div>
+      <div class="card">
+        <p class="lbl">Message to stage</p>
+        <div class="row"><input id="stageMsg" placeholder="Wrap up · 2 minutes" aria-label="Stage message"><button class="btn" id="sendStage">Send</button></div>
+      </div>
+      <div class="items" id="items"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  let pin = '';
+  try { pin = localStorage.getItem('lectern-pin') || ''; } catch (e) {}
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let last = '';
+  async function call(route, body) {
+    const r = await fetch('/api/' + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-Pin': pin }, body: body ? JSON.stringify(body) : undefined });
+    if (r.status === 401) { showLogin('Wrong PIN.'); throw new Error('pin'); }
+    const j = await r.json();
+    render(j);
+    return j;
+  }
+  function showLogin(msg) { $('login').hidden = false; $('app').hidden = true; $('loginErr').textContent = msg || ''; }
+  function fmt(t) {
+    const ms = t.durationMs - (t.accumulatedMs + (t.running ? Date.now() - t.startedAt : 0));
+    const neg = ms < 0, s = Math.floor(Math.abs(ms) / 1000);
+    return (neg ? '+' : '') + String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+  let state = null;
+  function render(j) {
+    state = j;
+    $('login').hidden = true; $('app').hidden = false;
+    $('svc').textContent = j.service;
+    $('now').textContent = j.layers.slide ? (j.current || '—') : '(slide cleared)';
+    $('nxt').textContent = 'Next: ' + (j.next || 'end of service');
+    const key = JSON.stringify([j.items, j.live]);
+    if (key === last) return;
+    last = key;
+    const open = new Set([...document.querySelectorAll('details[open]')].map((d) => d.dataset.id));
+    $('items').innerHTML = j.items.map((it) => '<details data-id="' + it.id + '"' + (it.id === j.live.itemId ? ' class="live"' : '') + (open.has(it.id) || it.id === j.live.itemId ? ' open' : '') + '><summary>' + esc(it.title) + '</summary><div class="slides">' +
+      it.slides.map((s, i) => '<button data-item="' + it.id + '" data-slide="' + i + '" style="border-left-color:' + s.color + '" class="' + (it.id === j.live.itemId && i === j.live.slide ? 'on' : '') + '">' + esc(s.text || s.group) + '</button>').join('') + '</div></details>').join('');
+  }
+  $('pinGo').onclick = () => { pin = $('pin').value.trim(); try { localStorage.setItem('lectern-pin', pin); } catch (e) {} call('state').catch(() => {}); };
+  $('next').onclick = () => call('next', {}).catch(() => {});
+  $('prev').onclick = () => call('prev', {}).catch(() => {});
+  $('clear').onclick = () => call('clear', {}).catch(() => {});
+  $('slideToggle').onclick = () => call('layer', { layer: 'slide' }).catch(() => {});
+  $('sendStage').onclick = () => call('stagemessage', { text: $('stageMsg').value, show: true }).catch(() => {});
+  $('items').addEventListener('click', (e) => { const b = e.target.closest('[data-slide]'); if (b) call('go', { itemId: b.dataset.item, slide: Number(b.dataset.slide) }).catch(() => {}); });
+  setInterval(() => { if (state) $('timer').textContent = 'Timer ' + fmt(state.timer); }, 500);
+  setInterval(() => { if (!$('app').hidden) call('state').catch(() => {}); }, 1500);
+  if (pin) call('state').catch(() => showLogin()); else showLogin();
+})();
+</script>
+</body>
+</html>

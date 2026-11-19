@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' lectern:; img-src 'self' lectern: data:; media-src 'self' lectern:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Lectern</title>
+<link rel="stylesheet" href="shared/render.css">
+<link rel="stylesheet" href="control.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">L</span>Lectern</div>
+    <input id="svcName" class="svc-name" aria-label="Service name" spellcheck="false">
+    <span id="dirty" class="dirty" title="Unsaved changes" hidden>●</span>
+    <div class="tb-group">
+      <button class="btn ghost" data-act="service/new" title="New service (Ctrl+N)">New</button>
+      <button class="btn ghost" data-act="service/open" title="Open service (Ctrl+O)">Open</button>
+      <button class="btn ghost" data-act="service/save" title="Save service (Ctrl+S)">Save</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="clears" role="group" aria-label="Clear layers">
+      <button class="clr" data-clear="media" title="F2">Media</button>
+      <button class="clr" data-clear="slide" title="F3">Slide</button>
+      <button class="clr" data-clear="props" title="F4">Props</button>
+      <button class="clr" data-clear="msg" title="F6">Message</button>
+      <button class="clr all" id="clearAll" title="F1">Clear all</button>
+      <button class="clr restore" id="restore" title="Bring back media, slide and props">Restore</button>
+    </div>
+    <div class="clock mono" id="clock">--:--:--</div>
+    <button class="btn icon" id="openSettings" title="Settings" aria-label="Settings">⚙</button>
+  </header>
+
+  <div id="ndiBanner" class="banner" hidden></div>
+
+  <main class="main">
+    <!-- Service + library -->
+    <section class="col col-left">
+      <div class="colhead">
+        <span class="lbl">Service order</span>
+        <div class="add-menu">
+          <button class="btn small" id="addBtn" aria-haspopup="true">+ Add</button>
+          <div class="menu" id="addMenu" hidden>
+            <button data-add="song">Song from library</button>
+            <button data-add="scripture">Scripture</button>
+            <button data-add="announce">Announcements / text</button>
+            <button data-add="countdown">Countdown</button>
+            <button data-add="media">Media (image or video)</button>
+            <button data-add="blank">Blank slide</button>
+          </div>
+        </div>
+      </div>
+      <ul class="order" id="order"></ul>
+      <div class="lib">
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="songs" aria-selected="true">Songs</button>
+          <button role="tab" data-tab="bible" aria-selected="false">Bible</button>
+          <button role="tab" data-tab="media" aria-selected="false">Media</button>
+        </div>
+        <div class="tabpane" data-pane="songs">
+          <div class="row">
+            <input id="songSearch" placeholder="Search songs" aria-label="Search songs">
+            <button class="btn small" id="newSong">New</button>
+            <button class="btn small ghost" data-act="song/import" title="Import SongSelect / plain text files">Import</button>
+          </div>
+          <ul class="songlist" id="songList"></ul>
+        </div>
+        <div class="tabpane" data-pane="bible" hidden>
+          <div class="row">
+            <input id="bibleRef" placeholder="John 3:16-18" aria-label="Bible reference">
+            <button class="btn small" id="bibleAdd">Add</button>
+          </div>
+          <div class="bible-prev" id="biblePrev"><span class="hint">King James Version. Type a reference like Psalm 23, Rom 8:28 or 1 Cor 13:4-7.</span></div>
+        </div>
+        <div class="tabpane" data-pane="media" hidden>
+          <div class="row">
+            <button class="btn small" data-act="media/import">Import media…</button>
+            <span class="hint" id="mediaHint">Click an item for options.</span>
+          </div>
+          <div class="mediagrid" id="mediaGrid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slides of the selected item -->
+    <section class="col col-mid">
+      <div class="colhead">
+        <div class="item-head">
+          <span class="lbl" id="itemType">—</span>
+          <span class="item-title" id="itemTitle">Select an item</span>
+        </div>
+        <div class="item-tools">
+          <label class="lbl" for="itemBg">Background</label>
+          <select id="itemBg" class="sel"></select>
+          <button class="btn small" id="editItem">Edit</button>
+        </div>
+      </div>
+      <div class="grid" id="grid"></div>
+    </section>
+
+    <!-- Program / preview / tools -->
+    <section class="col col-right">
+      <div class="mon">
+        <div class="mon-head"><span class="tally pgm">● Live</span><span class="lbl" id="liveLabel"></span></div>
+        <div class="frame"><div id="pgm"></div></div>
+        <div class="transport">
+          <button class="btn" id="prev">◀ Back</button>
+          <button class="btn go" id="next">Next ▶</button>
+        </div>
+      </div>
+      <div class="mon pv">
+        <div class="mon-head"><span class="tally pvw">Up next</span><span class="lbl" id="nextLabel"></span></div>
+        <div class="frame"><div id="pvw"></div></div>
+      </div>
+      <div class="tools">
+        <div class="tool">
+          <span class="lbl">Stage timer</span>
+          <div class="timer-row">
+            <span class="v mono" id="timerVal">35:00</span>
+            <input id="timerMin" type="number" min="1" max="600" aria-label="Timer minutes" title="Minutes">
+            <button class="btn small" id="timerToggle">Start</button>
+            <button class="btn small ghost" data-act="timer/reset">Reset</button>
+          </div>
+        </div>
+        <div class="tool">
+          <span class="lbl">Audience message</span>
+          <div class="msg-row">
+            <input id="msgText" aria-label="Audience message">
+            <button class="toggle" id="msgBtn" aria-pressed="false">Show</button>
+          </div>
+        </div>
+        <div class="tool">
+          <span class="lbl">Stage message (stage display only)</span>
+          <div class="msg-row">
+            <input id="stageText" aria-label="Stage message">
+            <button class="toggle" id="stageBtn" aria-pressed="false">Show</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="outs">
+    <div class="outs-head">
+      <span class="lbl">Outputs</span>
+      <span class="hint mono" id="ndiInfo"></span>
+    </div>
+    <div class="outs-grid" id="outs"></div>
+  </footer>
+</div>
+
+<div id="modal" class="modal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
+    <div class="dlg-head"><h2 id="dlgTitle"></h2><button class="btn icon" id="dlgClose" aria-label="Close">✕</button></div>
+    <div class="dlg-body" id="dlgBody"></div>
+    <div class="dlg-foot" id="dlgFoot"></div>
+  </div>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="../common/slides.js"></script>
+<script src="shared/render.js"></script>
+<script src="control.js"></script>
+</body>
+</html>

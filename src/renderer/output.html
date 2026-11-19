@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' lectern:; img-src 'self' lectern: data:; media-src 'self' lectern:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Lectern Output</title>
+<link rel="stylesheet" href="shared/render.css">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; cursor: none; }
+  #root { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="../common/slides.js"></script>
+<script src="shared/render.js"></script>
+<script src="output.js"></script>
+</body>
+</html>

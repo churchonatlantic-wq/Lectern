@@ -1,0 +1,63 @@
+/* Output surfaces. All sizes are in container units so a 200px preview and a 4K output look identical. */
+.surface { position: relative; width: 100%; height: 100%; overflow: hidden; container-type: size; background: #000;
+  --font: sans-serif; --color: #fff; --fs: 1; --fit: 1; font-family: var(--font); color: var(--color); }
+.surface.alpha { background: transparent; }
+.surface .L { position: absolute; inset: 0; }
+.surface .pane { position: absolute; inset: 0; opacity: 1; transition: opacity var(--tms, 300ms) ease; }
+.surface .pane.enter { opacity: 0; }
+.surface .pane.leave { opacity: 0; }
+.surface .L-media img, .surface .L-media video, .surface .L-fg img, .surface .L-fg video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.surface .L-fg img, .surface .L-fg video { object-fit: contain; background: #000; }
+
+/* Built-in motion backgrounds */
+.bg-preset { position: absolute; inset: 0; background-size: 180% 180%; animation: lec-drift 24s ease-in-out infinite alternate; }
+.bg-preset.still { animation: none; }
+.bg-aurora { background-image: radial-gradient(120% 90% at 20% 10%, #2d4a7a 0%, transparent 55%), radial-gradient(90% 80% at 85% 90%, #5a2f6b 0%, transparent 60%), linear-gradient(160deg, #0d1b33, #1a1030); }
+.bg-ember { background-image: radial-gradient(110% 90% at 80% 15%, #7a4a1f 0%, transparent 55%), radial-gradient(90% 80% at 10% 90%, #3a1d12 0%, transparent 60%), linear-gradient(160deg, #1d120a, #2a160d); }
+.bg-slate { background-image: radial-gradient(100% 80% at 50% 0%, #34404f 0%, transparent 60%), linear-gradient(180deg, #161b22, #0b0e12); }
+.bg-forest { background-image: radial-gradient(110% 90% at 15% 20%, #1f5a46 0%, transparent 55%), radial-gradient(90% 80% at 90% 85%, #183a52 0%, transparent 60%), linear-gradient(160deg, #0a1915, #0b1622); }
+.bg-black { background: #000; animation: none; }
+@keyframes lec-drift { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
+@media (prefers-reduced-motion: reduce) { .bg-preset { animation: none; } }
+
+/* Full-screen text */
+.s-box { position: absolute; inset: 7% 7% 9%; display: flex; flex-direction: column; align-items: center; justify-content: safe center; text-align: center; gap: 2.4cqh; overflow: hidden; }
+.s-text { font-weight: 700; font-size: calc(6.2cqh * var(--fs) * var(--fit)); line-height: 1.22; text-wrap: balance; }
+.s-scr { font-weight: 600; font-size: calc(5.2cqh * var(--fs) * var(--fit)); line-height: 1.3; text-align: left; text-wrap: pretty; }
+.s-scr sup { font-size: .5em; opacity: .7; margin-right: .2em; vertical-align: .6em; line-height: 0; }
+.s-ref { font-weight: 500; font-size: calc(3.6cqh * var(--fs) * var(--fit)); opacity: .85; letter-spacing: .03em; }
+.s-title { font-weight: 800; font-size: calc(9cqh * var(--fs) * var(--fit)); line-height: 1.1; text-wrap: balance; }
+.s-body { font-weight: 500; font-size: calc(4.6cqh * var(--fs) * var(--fit)); opacity: .92; line-height: 1.3; }
+.s-count { font-weight: 700; font-size: calc(20cqh * var(--fs)); font-variant-numeric: tabular-nums; line-height: 1; }
+.s-footer { position: absolute; left: 0; right: 0; bottom: 3%; text-align: center; font-size: 2.2cqh; opacity: .65; }
+.surface.upper .s-text, .surface.upper .s-title { text-transform: uppercase; }
+.surface.shadow .s-box, .surface.shadow .s-footer { text-shadow: 0 .4cqh 1.6cqh rgba(0,0,0,.7), 0 0 .3cqh rgba(0,0,0,.6); }
+
+/* Lower third band (keyed) */
+.band { position: absolute; left: 0; right: 0; bottom: 6%; max-height: 32%; padding: 2.6cqh 8cqw; background: linear-gradient(90deg, rgba(10,14,22,.9), rgba(10,14,22,.78)); border-top: .5cqh solid #f0b44c; text-align: center; display: flex; flex-direction: column; justify-content: center; gap: 1cqh; overflow: hidden; }
+.band .s-text { font-size: calc(5cqh * var(--fs) * var(--fit)); }
+.band .s-scr { font-size: calc(4.2cqh * var(--fs) * var(--fit)); text-align: center; }
+.band .s-ref { font-size: calc(3cqh * var(--fs) * var(--fit)); }
+
+/* Lyrics key: text only over transparency, heavy outline so it reads over any camera shot */
+.look-lyrics .s-box { inset: auto 6% 6% 6%; height: 34%; justify-content: safe flex-end; }
+.look-lyrics .s-text { font-size: calc(6.4cqh * var(--fs) * var(--fit)); text-shadow: 0 0 .6cqh #000, 0 0 1.2cqh #000, 0 .3cqh .4cqh #000; }
+.look-lyrics .s-title { font-size: calc(7cqh * var(--fs) * var(--fit)); text-shadow: 0 0 .8cqh #000, 0 0 1.4cqh #000; }
+.look-lyrics .s-body, .look-lyrics .s-ref { text-shadow: 0 0 .6cqh #000, 0 0 1.2cqh #000; }
+
+/* Props & messages */
+.prop-text { position: absolute; top: 4.5%; right: 3.5%; padding: 1.2cqh 2.2cqh; border-radius: 1cqh; background: rgba(0,0,0,.45); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 2.6cqh; color: #fff; }
+.prop-img { position: absolute; top: 4.5%; right: 3.5%; max-height: 11%; max-width: 20%; object-fit: contain; }
+.msg-bar { position: absolute; left: 0; right: 0; top: 0; padding: 1.8cqh 4cqw; background: #f0b44c; color: #1b1306; font-weight: 700; font-size: 3.6cqh; text-align: center; }
+
+/* Stage display */
+.stage { position: absolute; inset: 0; background: #000; color: #fff; display: grid; grid-template-rows: auto 1fr auto; font-family: var(--font); }
+.st-top { display: flex; justify-content: space-between; align-items: center; gap: 2cqw; padding: 2.4cqh 3cqw; font-size: 6cqh; font-variant-numeric: tabular-nums; font-weight: 600; }
+.st-top .st-item { font-size: 3cqh; color: #9aa4b2; text-align: center; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.st-top [data-timer] { color: #7dd88f; }
+.st-top [data-timer].over { color: #ff5c5c; }
+.st-cur { padding: 0 4cqw; display: flex; align-items: safe center; overflow: hidden; }
+.st-cur > div { font-weight: 700; font-size: calc(8cqh * var(--fs) * var(--fit)); line-height: 1.18; }
+.st-next { padding: 2cqh 3cqw 3cqh; border-top: .4cqh solid #333; color: #ffd27a; font-size: calc(4.6cqh * var(--fs)); line-height: 1.25; max-height: 30cqh; overflow: hidden; }
+.st-next b { display: block; font-size: 2.6cqh; letter-spacing: .14em; color: #888; text-transform: uppercase; }
+.st-msg { position: absolute; left: 4cqw; right: 4cqw; top: 16%; padding: 2cqh; background: #c8102e; text-align: center; font-weight: 800; font-size: 6cqh; border-radius: 1.4cqh; }

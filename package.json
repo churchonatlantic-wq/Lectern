@@ -1,0 +1,107 @@
+{
+  "name": "lectern",
+  "productName": "Lectern",
+  "version": "1.0.0",
+  "description": "Worship presentation software with six NDI outputs",
+  "main": "src/main/main.js",
+  "author": "Lectern",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --x64",
+    "dist:mac": "electron-builder --mac",
+    "test:ndi": "node test/ndi-loopback.js"
+  },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "resedit": "^1.7.2"
+  },
+  "build": {
+    "appId": "app.lectern.presenter",
+    "productName": "Lectern",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!test/**",
+      "!build/**"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "lectern",
+        "name": "Lectern Service",
+        "role": "Editor"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "files": [
+        "!node_modules/koffi/build/koffi/{darwin,linux,freebsd,openbsd,musl,win32_i386,win32_arm64}*/**"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Lectern-Setup-${version}.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.video",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "Lectern sends NDI video to other devices on your network and serves the phone remote.",
+        "NSBonjourServices": [
+          "_ndi._tcp"
+        ]
+      },
+      "files": [
+        "!node_modules/koffi/build/koffi/{win32,linux,freebsd,openbsd,musl}*/**"
+      ]
+    },
+    "afterPack": "build/afterPack.js"
+  }
+}

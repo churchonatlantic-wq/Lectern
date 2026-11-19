@@ -63,3 +63,12 @@ Control changes such as font size, importing files and backgrounds by asking Cla
   - Lectern asks before anything affects the live output during a service.
   - Everything can be undone.
 - **Open question:** whether the chat panel should also appear on the phone remote.
+
+## 8. PowerPoint import
+
+- Import `.pptx` files from the File menu, or by dragging them onto the service order.
+- Two ways to import:
+  - **As text slides:** each PowerPoint slide becomes an editable Lectern slide, keeping its text and its order. Text can then be restyled with Lectern's text boxes and presets.
+  - **As pictures:** each slide becomes an image, so it looks exactly like the original, including its design and graphics. This needs PowerPoint or the free LibreOffice installed on the PC to turn the slides into images.
+- The imported slides become one item in the service, with the file name as its title.
+- Older `.ppt` files are converted the same way as pictures, when PowerPoint or LibreOffice is available.

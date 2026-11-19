@@ -69,7 +69,8 @@
       "allowToChangeInstallationDirectory": true,
       "artifactName": "Lectern-Setup-${version}.${ext}",
       "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "uninstallerIcon": "build/icon.ico",
+      "perMachine": true
     },
     "mac": {
       "target": [

@@ -1,5 +1,5 @@
 ; Lectern Windows installer. Built with makensis (works on Windows, macOS and Linux, no Wine needed).
-;   makensis -DVERSION=1.0.0 -DSRCDIR=dist/win-unpacked -DOUTFILE=dist/Lectern-Setup-1.0.0.exe build/installer.nsi
+;   makensis -DVERSION=1.0.0 -DSRCDIR=dist/win-unpacked -DOUTFILE=dist/Lectern-Setup-1.0.0.exe build/standalone-installer.nsi
 Unicode true
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64

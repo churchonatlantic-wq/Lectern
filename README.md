@@ -129,7 +129,7 @@ npm start
 - Windows installer, on Windows: `npm run dist:win`.
 - Universal, signed DMG, on a Mac: `npm run dist:mac`. Set `CSC_LINK`/`CSC_KEY_PASSWORD` to sign, and `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` to notarize.
 - Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.1.1.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
-- CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`.
+- CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`. To publish them, type a release tag (for example `v1.1.1`) in **Release tag** when you start the run: the installers are attached to that release, which is created if it doesn't exist. Pushing a `v*` tag does the same for that tag.
 
 ### NDI loopback test
 

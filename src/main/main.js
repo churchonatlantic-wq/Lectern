@@ -50,6 +50,7 @@ const runtime = {
 function fullState() {
   const d = store.data;
   return {
+    bibles: bible.list(),
     library: d.library, service: d.service, servicePath: d.servicePath, settings: d.settings, outputs: d.outputs, usageCount: d.usage.length,
     live: runtime.live, layers: runtime.layers, message: runtime.message, stageMessage: runtime.stageMessage, timer: runtime.timer,
     status: runtime.status, media: store.listMedia(), dirty: runtime.dirty, platform: process.platform,
@@ -402,7 +403,63 @@ async function dispatch(type, p = {}) {
       d.library.songs = d.library.songs.filter((x) => x.id !== p.id); changed({ persist: true }); return true;
     case 'song/import': return importSongs(p.paths);
 
-    case 'bible/lookup': return bible.lookup(p.ref);
+    case 'bible/lookup': return { ...bible.lookup(p.ref, p.translation || d.settings.bibleTranslation), copyright: bible.copyright(p.translation || d.settings.bibleTranslation) };
+    case 'bible/list': return bible.list();
+    case 'bible/pick': {
+      const r = await dialog.showOpenDialog(control, { title: 'Import a Bible translation', properties: ['openFile'], filters: [{ name: 'Bible files', extensions: ['xml', 'osis', 'json', 'gz'] }, { name: 'All files', extensions: ['*'] }] });
+      if (r.canceled || !r.filePaths[0]) return null;
+      return { path: r.filePaths[0], ...bible.inspect(r.filePaths[0]) };
+    }
+    case 'bible/import': { const r = bible.importFile(p.path, p); changed(); return r; }
+    case 'bible/remove': bible.remove(p.id); if (d.settings.bibleTranslation === String(p.id).toUpperCase()) d.settings.bibleTranslation = 'KJV'; changed({ persist: true }); return true;
+
+    // Folders in the song and media libraries. Songs keep their folder on the song; media files
+    // are mapped to a folder by name. Deleting a folder moves its contents to Unfiled.
+    case 'folder/create': {
+      const key = p.kind === 'media' ? 'mediaFolders' : 'songFolders';
+      const name = String(p.name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+      if (!name) throw new Error('A folder needs a name.');
+      const list = d.settings[key] = d.settings[key] || [];
+      if (!list.some((x) => x.toLowerCase() === name.toLowerCase())) list.push(name);
+      list.sort((a, b) => a.localeCompare(b));
+      changed({ persist: true }); return name;
+    }
+    case 'folder/rename': {
+      const key = p.kind === 'media' ? 'mediaFolders' : 'songFolders';
+      const to = String(p.to || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+      if (!to) throw new Error('A folder needs a name.');
+      const list = d.settings[key] || [];
+      const i = list.indexOf(p.from);
+      if (i < 0) return false;
+      if (list.some((x, j) => j !== i && x.toLowerCase() === to.toLowerCase())) throw new Error('There is already a folder called “' + to + '”.');
+      list[i] = to; list.sort((a, b) => a.localeCompare(b));
+      if (p.kind === 'media') { for (const [f, fo] of Object.entries(d.settings.mediaFolder || {})) if (fo === p.from) d.settings.mediaFolder[f] = to; }
+      else d.library.songs.forEach((s) => { if (s.folder === p.from) s.folder = to; });
+      changed({ persist: true }); return to;
+    }
+    case 'folder/delete': {
+      const key = p.kind === 'media' ? 'mediaFolders' : 'songFolders';
+      d.settings[key] = (d.settings[key] || []).filter((x) => x !== p.name);
+      if (p.kind === 'media') { for (const [f, fo] of Object.entries(d.settings.mediaFolder || {})) if (fo === p.name) delete d.settings.mediaFolder[f]; }
+      else d.library.songs.forEach((s) => { if (s.folder === p.name) delete s.folder; });
+      changed({ persist: true }); return true;
+    }
+    case 'folder/assign': {
+      const folder = p.folder || null;
+      const key = p.kind === 'media' ? 'mediaFolders' : 'songFolders';
+      if (folder && !(d.settings[key] || []).includes(folder)) await dispatch('folder/create', { kind: p.kind, name: folder });
+      for (const id of p.items || []) {
+        if (p.kind === 'media') {
+          const m = d.settings.mediaFolder = d.settings.mediaFolder || {};
+          const name = path.basename(String(id));
+          if (folder) m[name] = folder; else delete m[name];
+        } else {
+          const s = d.library.songs.find((x) => x.id === id);
+          if (s) { if (folder) s.folder = folder; else delete s.folder; }
+        }
+      }
+      changed({ persist: true }); return true;
+    }
     case 'bible/books': return bible.bookNames();
 
     case 'live/go': {
@@ -446,10 +503,16 @@ async function dispatch(type, p = {}) {
       return true;
     }
 
-    case 'media/import': return importMedia(p.paths);
+    case 'media/import': {
+      const added = await importMedia(p.paths);
+      if (p.folder && added.length) await dispatch('folder/assign', { kind: 'media', items: added, folder: p.folder });
+      return added;
+    }
     case 'media/remove': {
       const f = path.join(store.mediaDir, path.basename(p.name));
       if (fs.existsSync(f)) fs.unlinkSync(f);
+      if (d.settings.mediaFolder) delete d.settings.mediaFolder[path.basename(p.name)];
+      store.save();
       changed(); return true;
     }
     case 'media/reveal': shell.showItemInFolder(path.join(store.mediaDir, path.basename(p.name || ''))); return true;
@@ -685,6 +748,7 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(path.join(store.mediaDir, name)).toString(), { headers: req.headers });
   });
 
+  bible.init(path.join(app.getPath('userData'), 'bibles'));
   store = new Store(app.getPath('userData'), bible);
   runtime.timer.durationMs = (store.data.settings.timerMinutes || 35) * 60000;
   if (process.env.LECTERN_DISABLE_NDI) store.data.outputs.forEach((o) => { o.ndi = false; });
@@ -731,7 +795,7 @@ app.whenReady().then(async () => {
   ipcMain.on('pdf/fail', (e, msg) => { const j = pdfJobs.get(e.sender.id); if (j) j.finish(new Error('Could not read the slides: ' + msg)); });
 
   bridge = new Bridge({
-    store, runtime, dispatch, slides: Slides, confirm: confirmClaude,
+    store, runtime, dispatch, slides: Slides, confirm: confirmClaude, bibles: () => bible.list(),
     importers: { media: (paths) => importMedia(paths), songs: (paths) => importSongs(paths), powerpoint: (file, mode) => importPowerPoint(file, mode) },
     onApplied: () => broadcast(),
     onRestore: async () => { runtime.dirty = true; store.save(); await outputs.sync(); await inputs.sync(); broadcast(); },

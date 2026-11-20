@@ -107,10 +107,21 @@
     const list = items();
     const ul = $('order');
     if (!list.length) { ul.innerHTML = '<li class="empty">No items yet. Use + Add.</li>'; return; }
-    ul.innerHTML = list.map((it) => {
+    let inSection = null;
+    ul.innerHTML = list.map((it, idx) => {
+      if (it.type === 'section') {
+        inSection = it;
+        let count = 0;
+        for (let j = idx + 1; j < list.length && list[j].type !== 'section'; j++) count++;
+        return '<li draggable="true" data-id="' + it.id + '" class="section' + (it.collapsed ? ' closed' : '') + (it.id === sel ? ' sel' : '') + '">' +
+          '<span class="caret" data-fold title="Open or close this folder">▾</span>' +
+          '<span style="min-width:0"><div class="t">' + esc(it.title || 'Folder') + '</div><div class="k">' + count + ' item' + (count === 1 ? '' : 's') + '</div></span><span></span>' +
+          '<span class="it-actions"><button data-mv="-1" title="Move up">▲</button><button data-mv="1" title="Move down">▼</button><button data-edit title="Rename">✎</button><button data-del title="Remove folder (keeps its items)">✕</button></span></li>';
+      }
+      const hidden = inSection && inSection.collapsed && it.id !== st.live.itemId;
       const n = slidesOf(it).length;
       const sub = TYPE_LABEL[it.type] + (n > 1 ? ' · ' + n + ' slides' : '') + (it.type === 'countdown' ? ' · ' + esc(it.target) : '');
-      return '<li draggable="true" data-id="' + it.id + '" class="' + (it.id === sel ? 'sel ' : '') + (it.id === st.live.itemId ? 'live' : '') + '">' +
+      return '<li draggable="true" data-id="' + it.id + '" class="' + (it.id === sel ? 'sel ' : '') + (it.id === st.live.itemId ? 'live ' : '') + (inSection ? 'in-section ' : '') + (hidden ? 'hidden-by-folder' : '') + '">' +
         '<span class="sw" style="background:' + TYPE_COLOR[it.type] + '"></span>' +
         '<span style="min-width:0"><div class="t">' + esc(titleOf(it)) + '</div><div class="k">' + sub + '</div></span>' +
         '<span class="live-dot" title="On screen"></span>' +
@@ -123,6 +134,8 @@
     const li = e.target.closest('li[data-id]');
     if (!li) return;
     const id = li.dataset.id;
+    const itm = findItem(id);
+    if (itm && itm.type === 'section' && (e.target.closest('[data-fold]') || (!e.target.closest('.it-actions') && li.classList.contains('sel')))) { act('item/update', { id, patch: { collapsed: !itm.collapsed } }); return; }
     if (e.target.closest('[data-mv]')) { act('item/move', { id, dir: Number(e.target.closest('[data-mv]').dataset.mv) }); return; }
     if (e.target.closest('[data-edit]')) { editItem(findItem(id)); return; }
     if (e.target.closest('[data-del]')) { confirmRemove(id); return; }
@@ -338,15 +351,109 @@
   }
 
   // ---------- library: songs ----------
-  function renderSongs() {
-    const q = $('songSearch').value.trim().toLowerCase();
-    const songs = st.library.songs.slice().sort((a, b) => a.title.localeCompare(b.title))
-      .filter((s) => !q || s.title.toLowerCase().includes(q) || (s.author || '').toLowerCase().includes(q) || (s.lyrics || '').toLowerCase().includes(q));
-    $('songList').innerHTML = songs.length ? songs.map((s) =>
-      '<li data-song="' + s.id + '"><span class="s-t" title="Edit">' + esc(s.title) + (s.author ? ' <span class="s-a">' + esc(s.author) + '</span>' : '') + '</span>' +
-      '<button class="btn small ghost" data-addsong="' + s.id + '" title="Add to service">+ Add</button></li>').join('')
-      : '<li class="empty">No songs match.</li>';
+  // ---------- folders (songs and media) ----------
+  const FOLD_KEY = 'lectern.folders.closed';
+  let closedFolders;
+  try { closedFolders = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]')); } catch { closedFolders = new Set(); }
+  const saveFolds = () => { try { localStorage.setItem(FOLD_KEY, JSON.stringify(Array.from(closedFolders))); } catch { /* storage unavailable */ } };
+  const folderList = (kind) => (kind === 'media' ? st.settings.mediaFolders : st.settings.songFolders) || [];
+  function fillFolderSelect(sel, kind) {
+    const key = JSON.stringify(folderList(kind));
+    if (sel.dataset.key === key) return;
+    const cur = sel.value || '*';
+    sel.dataset.key = key;
+    sel.innerHTML = '<option value="*">All folders</option>' + folderList(kind).map((f) => '<option value="' + esc(f) + '">' + esc(f) + '</option>').join('') + '<option value="">Unfiled</option>';
+    sel.value = Array.from(sel.options).some((o) => o.value === cur) ? cur : '*';
   }
+  const folderHeader = (kind, name, count, droppable, label) => {
+    const key = kind + ':' + name;
+    return { key, closed: closedFolders.has(key), html: (tag) => '<' + tag + ' class="folder-h' + (closedFolders.has(key) ? ' closed' : '') + '" data-fold-kind="' + kind + '" data-fold-name="' + esc(name) + '"' + (droppable ? ' data-drop-folder="1"' : '') + '>' + esc(label || name || 'Unfiled') + ' <span class="n">' + count + '</span></' + tag + '>' };
+  };
+  async function newFolder(kind, then) {
+    openDialog({
+      title: kind === 'media' ? 'New media folder' : 'New song folder',
+      body: '<label class="field"><span>Folder name</span><input id="fdName" placeholder="' + (kind === 'media' ? 'Backgrounds' : 'Christmas') + '"></label>',
+      buttons: [{ label: 'Cancel', cls: 'ghost' }, { label: 'Create', cls: 'primary', onClick: async () => { const n = await act('folder/create', { kind, name: val('fdName') }); if (!n) return false; if (then) then(n); } }],
+      onOpen: (body) => body.querySelector('#fdName').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.querySelector('#dlgFoot .primary').click(); }),
+    });
+  }
+  function manageFolders(kind) {
+    const draw = (body) => {
+      const list = folderList(kind);
+      body.querySelector('#fdList').innerHTML = list.length ? list.map((f) => '<li><input value="' + esc(f) + '" data-fdren="' + esc(f) + '" aria-label="Folder name"><button class="btn small ghost danger" data-fddel="' + esc(f) + '">Delete</button></li>').join('')
+        : '<li class="empty">No folders yet.</li>';
+    };
+    openDialog({
+      title: kind === 'media' ? 'Media folders' : 'Song folders',
+      body: '<ul class="songlist" id="fdList"></ul><p class="hint">Edit a name to rename the folder. Deleting a folder moves what is in it to Unfiled; nothing is deleted.</p>',
+      buttons: [{ label: '+ New folder', cls: 'ghost', onClick: () => { setTimeout(() => newFolder(kind, () => manageFolders(kind)), 0); } }, { label: 'Done', cls: 'primary' }],
+      onOpen: (body) => {
+        draw(body);
+        body.addEventListener('change', async (e) => { const i = e.target.closest('[data-fdren]'); if (i && i.value.trim() && i.value !== i.dataset.fdren) { await act('folder/rename', { kind, from: i.dataset.fdren, to: i.value }); setTimeout(() => draw(body), 100); } });
+        body.addEventListener('click', async (e) => { const b = e.target.closest('[data-fddel]'); if (b) { await act('folder/delete', { kind, name: b.dataset.fddel }); setTimeout(() => draw(body), 100); } });
+      },
+    });
+  }
+  document.querySelectorAll('[data-newfolder]').forEach((b) => b.addEventListener('click', () => newFolder(b.dataset.newfolder)));
+  document.querySelectorAll('[data-folders]').forEach((b) => b.addEventListener('click', () => manageFolders(b.dataset.folders)));
+  // Open/close a folder group, and drop songs or media files onto a folder to move them there.
+  document.addEventListener('click', (e) => {
+    const h = e.target.closest('.folder-h[data-fold-kind]');
+    if (!h) return;
+    const key = h.dataset.foldKind + ':' + h.dataset.foldName;
+    if (closedFolders.has(key)) closedFolders.delete(key); else closedFolders.add(key);
+    saveFolds();
+    if (h.dataset.foldKind === 'media') { $('mediaGrid').dataset.key = ''; renderMedia(); } else renderSongs();
+  });
+  const dragKind = (e) => (e.dataTransfer.types.includes('application/x-lectern-song') ? 'songs' : e.dataTransfer.types.includes('application/x-lectern-bg') ? 'media' : null);
+  document.addEventListener('dragover', (e) => {
+    const h = e.target.closest('.folder-h[data-drop-folder]');
+    if (!h || dragKind(e) !== h.dataset.foldKind) return;
+    e.preventDefault();
+    document.querySelectorAll('.folder-h.drop').forEach((x) => x !== h && x.classList.remove('drop'));
+    h.classList.add('drop');
+  });
+  document.addEventListener('dragleave', (e) => { const h = e.target.closest('.folder-h.drop'); if (h && !h.contains(e.relatedTarget)) h.classList.remove('drop'); });
+  document.addEventListener('drop', (e) => {
+    const h = e.target.closest('.folder-h[data-drop-folder]');
+    document.querySelectorAll('.folder-h.drop').forEach((x) => x.classList.remove('drop'));
+    if (!h) return;
+    const kind = h.dataset.foldKind;
+    const id = kind === 'songs' ? e.dataTransfer.getData('application/x-lectern-song') : e.dataTransfer.getData('application/x-lectern-bg');
+    if (!id || (kind === 'media' && /^(preset|input):/.test(id))) return;
+    e.preventDefault();
+    act('folder/assign', { kind, items: [id], folder: h.dataset.foldName || null }).then(() => toast('Moved to ' + (h.dataset.foldName || 'Unfiled')));
+  });
+
+  function renderSongs() {
+    fillFolderSelect($('songFolder'), 'songs');
+    const q = $('songSearch').value.trim().toLowerCase();
+    const filter = $('songFolder').value;
+    const songs = st.library.songs.slice().sort((a, b) => a.title.localeCompare(b.title))
+      .filter((s) => !q || s.title.toLowerCase().includes(q) || (s.author || '').toLowerCase().includes(q) || (s.lyrics || '').toLowerCase().includes(q))
+      .filter((s) => filter === '*' || (s.folder || '') === filter);
+    const row = (s) => '<li data-song="' + s.id + '" draggable="true"><span class="s-t" title="Edit · drag onto a folder or the service order">' + esc(s.title) + (s.author ? ' <span class="s-a">' + esc(s.author) + '</span>' : '') + '</span>' +
+      '<button class="btn small ghost" data-addsong="' + s.id + '" title="Add to service">+ Add</button></li>';
+    let html = '';
+    if (filter !== '*') html = songs.map(row).join('');
+    else {
+      const groups = folderList('songs').concat(['']);
+      for (const f of groups) {
+        const inF = songs.filter((s) => (s.folder || '') === f && (f === '' || folderList('songs').includes(f)) || (f === '' && s.folder && !folderList('songs').includes(s.folder)));
+        if (!inF.length && (q || f === '')) continue;
+        const h = folderHeader('songs', f, inF.length, true);
+        html += h.html('li') + (h.closed && !q ? '' : inF.map(row).join(''));
+      }
+    }
+    $('songList').innerHTML = html || '<li class="empty">' + (q ? 'No songs match.' : 'No songs in this folder.') + '</li>';
+  }
+  $('songFolder').addEventListener('change', renderSongs);
+  $('songList').addEventListener('dragstart', (e) => {
+    const li = e.target.closest('[data-song]');
+    if (!li) return;
+    e.dataTransfer.setData('application/x-lectern-song', li.dataset.song);
+    e.dataTransfer.effectAllowed = 'copyMove';
+  });
   $('songSearch').addEventListener('input', renderSongs);
   $('songList').addEventListener('click', (e) => {
     const add = e.target.closest('[data-addsong]');
@@ -371,8 +478,8 @@
       const ref = $('bibleRef').value.trim();
       if (!ref) return;
       try {
-        bibleResult = await api.action('bible/lookup', { ref });
-        $('biblePrev').innerHTML = '<div class="section-title">' + esc(bibleResult.ref) + ' · KJV</div>' +
+        bibleResult = await api.action('bible/lookup', { ref, translation: $('bibleTr').value });
+        $('biblePrev').innerHTML = '<div class="section-title">' + esc(bibleResult.ref) + ' · ' + esc(bibleResult.translation) + '</div>' +
           bibleResult.verses.map((v) => '<div><sup>' + v.verse + '</sup>' + esc(v.text) + '</div>').join('');
       } catch (e) { bibleResult = null; $('biblePrev').innerHTML = '<span class="hint">' + esc(e.message) + '</span>'; }
     }, 250);
@@ -380,23 +487,111 @@
   async function addBible() {
     const ref = $('bibleRef').value.trim();
     if (!ref) return;
-    const r = await act('bible/lookup', { ref });
-    if (r) addItem({ type: 'scripture', ref: r.ref, translation: r.translation, verses: r.verses });
+    const r = await act('bible/lookup', { ref, translation: $('bibleTr').value });
+    if (r) addItem({ type: 'scripture', ref: r.ref, translation: r.translation, verses: r.verses, copyright: copyrightLine(r) });
+  }
+  // Licensed translations usually require their copyright notice on screen; public domain ones do not.
+  const copyrightLine = (r) => (r.copyright && !/^public domain$/i.test(r.copyright) ? r.copyright : undefined);
+
+  function renderBibleTranslations() {
+    const sel = $('bibleTr');
+    const key = JSON.stringify([st.bibles, st.settings.bibleTranslation]);
+    if (sel.dataset.key === key) return;
+    sel.dataset.key = key;
+    sel.innerHTML = (st.bibles || []).map((t) => '<option value="' + esc(t.id) + '"' + (t.id === st.settings.bibleTranslation ? ' selected' : '') + '>' + esc(t.id) + ' · ' + esc(t.name) + '</option>').join('');
+  }
+  $('bibleTr').addEventListener('change', (e) => {
+    act('settings/update', { patch: { bibleTranslation: e.target.value } });
+    $('bibleRef').dispatchEvent(new Event('input'));
+  });
+  $('bibleManage').addEventListener('click', manageTranslations);
+
+  function manageTranslations() {
+    const draw = (body) => {
+      body.querySelector('#trList').innerHTML = (st.bibles || []).map((t) => '<li><span class="s-t"><b>' + esc(t.id) + '</b> ' + esc(t.name) +
+        ' <span class="s-a">' + (t.builtIn ? 'built in' : 'imported') + (t.copyright ? ' · ' + esc(t.copyright) : '') + '</span></span>' +
+        (t.imported ? '<button class="btn small ghost danger" data-trdel="' + esc(t.id) + '">Remove</button>' : '') + '</li>').join('');
+    };
+    openDialog({
+      title: 'Bible translations',
+      wide: true,
+      body: '<ul class="songlist" id="trList" style="max-height:260px"></ul>' +
+        '<div class="section-title">Add a translation</div>' +
+        '<p class="hint">KJV, BSB, ASV and YLT are public domain and built in. Copyrighted translations such as NIV, NKJV, NASB, NLT, ESV and The Message can only be used under a licence from their publisher, so they cannot come with Lectern. If your church has a licence and a Bible file for one, import it here. Lectern reads OpenSong XML, Zefania XML, OSIS XML and JSON Bible files, the formats used by OpenSong, OpenLP and similar software.</p>' +
+        '<div class="row"><button class="btn small" id="trPick">Choose a Bible file…</button><span class="hint" id="trInfo"></span></div>' +
+        '<div class="fields" id="trForm" hidden>' +
+        '<label class="field"><span>Short name</span><input id="trId" maxlength="12" placeholder="NIV"></label>' +
+        '<label class="field"><span>Full name</span><input id="trName" placeholder="New International Version"></label>' +
+        '<label class="field"><span>Copyright notice shown with verses</span><input id="trCopy" placeholder="Scripture taken from …"><small>Most licences require this on screen.</small></label>' +
+        '</div>',
+      buttons: [{ label: 'Close', cls: 'ghost' }, {
+        label: 'Import', cls: 'primary', onClick: async () => {
+          const f = document.getElementById('trForm');
+          if (f.hidden) { toast('Choose a Bible file first.', true); return false; }
+          const r = await act('bible/import', { path: f.dataset.path, id: val('trId'), name: val('trName'), copyright: val('trCopy') });
+          if (!r) return false;
+          await act('settings/update', { patch: { bibleTranslation: r.id } });
+          toast('Imported ' + r.id + ' · ' + r.verses.toLocaleString() + ' verses');
+        },
+      }],
+      onOpen: (body) => {
+        draw(body);
+        body.querySelector('#trPick').addEventListener('click', async () => {
+          const r = await act('bible/pick');
+          if (!r) return;
+          const f = body.querySelector('#trForm');
+          f.hidden = false; f.dataset.path = r.path;
+          body.querySelector('#trInfo').textContent = r.path.split(/[\\/]/).pop() + ' · ' + r.format + ' · ' + r.books + ' books, ' + r.verses.toLocaleString() + ' verses';
+          const guess = (r.path.split(/[\\/]/).pop().match(/\b(NIV|NKJV|NASB|NLT|ESV|MSG|CSB|NRSV|AMP|NET|RSV|CEB|GNT|NIRV|WEB)\b/i) || [])[1];
+          if (guess) body.querySelector('#trId').value = guess.toUpperCase();
+          body.querySelector('#trId').focus();
+        });
+        body.addEventListener('click', async (e) => {
+          const b = e.target.closest('[data-trdel]');
+          if (!b) return;
+          await act('bible/remove', { id: b.dataset.trdel });
+          setTimeout(() => draw(body), 100);
+        });
+      },
+    });
   }
   $('bibleAdd').addEventListener('click', addBible);
   $('bibleRef').addEventListener('keydown', (e) => { if (e.key === 'Enter') addBible(); });
 
   // ---------- library: media ----------
   function renderMedia() {
-    const all = PRESETS.map(([v, l]) => ({ v, l })).concat(st.media.map((m) => ({ v: m, l: m })));
-    const key = JSON.stringify([all, st.settings.defaultBackground, st.service.mediaOptions]);
+    fillFolderSelect($('mediaFolderSel'), 'media');
+    const filter = $('mediaFolderSel').value;
+    const map = st.settings.mediaFolder || {};
+    const folders = folderList('media');
+    const folderOf = (m) => (map[m] && folders.includes(map[m]) ? map[m] : '');
+    const key = JSON.stringify([st.media, st.settings.defaultBackground, st.service.mediaOptions, filter, map, folders]);
     if ($('mediaGrid').dataset.key === key) return;
     $('mediaGrid').dataset.key = key;
     const opts = st.service.mediaOptions || {};
-    $('mediaGrid').innerHTML = all.map(({ v, l }) =>
-      '<button class="mthumb' + (v === st.settings.defaultBackground ? ' default' : '') + '" data-media="' + esc(v) + '" draggable="true" title="' + esc(l) + ' · drag onto a slide">' +
-      R.mediaHTML(v, { still: true }) + (opts[v] && opts[v].speed !== 1 ? '<b class="speed">' + opts[v].speed + '×</b>' : '') + '<span>' + esc(l.replace(/^preset:/, '')) + '</span></button>').join('');
+    const thumb = ({ v, l }) => '<button class="mthumb' + (v === st.settings.defaultBackground ? ' default' : '') + '" data-media="' + esc(v) + '" draggable="true" title="' + esc(l) + ' · drag onto a slide or a folder">' +
+      R.mediaHTML(v, { still: true }) + (opts[v] && opts[v].speed !== 1 ? '<b class="speed">' + opts[v].speed + '×</b>' : '') + '<span>' + esc(l.replace(/^preset:/, '')) + '</span></button>';
+    const files = st.media.map((m) => ({ v: m, l: m }));
+    let html = '';
+    if (filter !== '*') html = files.filter((x) => folderOf(x.v) === filter).map(thumb).join('') || '<div class="empty" style="grid-column:1/-1">No media in this folder.</div>';
+    else {
+      const ph = folderHeader('media', '*presets', PRESETS.length, false, 'Built-in backgrounds');
+      html += ph.html('div') + (ph.closed ? '' : PRESETS.map(([v, l]) => thumb({ v, l })).join(''));
+      for (const f of folders.concat([''])) {
+        const inF = files.filter((x) => folderOf(x.v) === f);
+        if (!inF.length && f === '') continue;
+        const h = folderHeader('media', f, inF.length, true);
+        html += h.html('div') + (h.closed ? '' : inF.map(thumb).join(''));
+      }
+    }
+    $('mediaGrid').innerHTML = html;
   }
+  $('mediaFolderSel').addEventListener('change', () => { $('mediaGrid').dataset.key = ''; renderMedia(); });
+  $('mediaImport').addEventListener('click', async () => {
+    const f = $('mediaFolderSel').value;
+    const added = await act('media/import', { folder: f && f !== '*' ? f : undefined });
+    if (added && added.length) toast('Imported ' + added.length + ' file' + (added.length === 1 ? '' : 's') + (f && f !== '*' ? ' into ' + f : ''));
+  });
   $('mediaGrid').addEventListener('dragstart', (e) => {
     const b = e.target.closest('[data-media]');
     if (!b) return;
@@ -421,13 +616,17 @@
           (SPEEDS.includes(speed) ? '' : '<option value="' + speed + '" selected>' + Math.round(speed * 100) + '%</option>') + '</select></label>' +
           '<label class="field"><span>Sound</span><select id="mdAudio"><option value="follow"' + (o.audioFollow !== false ? ' selected' : '') + '>Follows the video speed</option><option value="normal"' + (o.audioFollow === false ? ' selected' : '') + '>Stays at 100%</option></select>' +
           '<small>Keeping the sound at 100% suits videos without speech. It can drift from the picture.</small></label>' +
-          '</div><div class="row"><button class="btn small ghost" id="mdReset">Reset to 100%</button><span class="hint">Saved with the service. Changes apply straight away, even while the video is live.</span></div>' : ''),
-      onOpen: video ? (body) => {
+          '</div><div class="row"><button class="btn small ghost" id="mdReset">Reset to 100%</button><span class="hint">Saved with the service. Changes apply straight away, even while the video is live.</span></div>' : '') +
+        (!isPreset ? '<label class="field"><span>Folder</span><select id="mdFolder"><option value="">Unfiled</option>' + folderList('media').map((f) => '<option value="' + esc(f) + '"' + ((st.settings.mediaFolder || {})[name] === f ? ' selected' : '') + '>' + esc(f) + '</option>').join('') + '</select></label>' : ''),
+      onOpen: (body) => {
+        const fsel = body.querySelector('#mdFolder');
+        if (fsel) fsel.addEventListener('change', () => act('folder/assign', { kind: 'media', items: [name], folder: fsel.value || null }));
+        if (!video) return;
         const save = () => act('media/options', { name, speed: Number(body.querySelector('#mdSpeed').value), audioFollow: body.querySelector('#mdAudio').value !== 'normal' });
         body.querySelector('#mdSpeed').addEventListener('change', save);
         body.querySelector('#mdAudio').addEventListener('change', save);
         body.querySelector('#mdReset').addEventListener('click', () => { body.querySelector('#mdSpeed').value = '1'; body.querySelector('#mdAudio').value = 'follow'; save(); });
-      } : undefined,
+      },
       buttons: [
         ...(!isPreset ? [{ label: 'Delete', cls: 'danger', onClick: () => act('media/remove', { name }) }] : []),
         { label: 'Use as service default', cls: 'ghost', onClick: () => act('settings/update', { patch: { defaultBackground: name } }) },
@@ -460,6 +659,7 @@
     else if (t === 'pptx') importPowerPoint();
     else if (t === 'input') pickInputItem();
     else if (t === 'blank') addItem({ type: 'blank' });
+    else if (t === 'section') { const id = await addItem({ type: 'section', title: 'New folder' }); if (id) editItem(findItem(id)); }
   });
 
   function pickSong() {
@@ -504,7 +704,17 @@
     if (it.type === 'scripture') return editScripture(it);
     if (it.type === 'media') return pickMedia((name) => act('item/update', { id: it.id, patch: { media: name } }));
     if (it.type === 'deck') return editDeck(it);
+    if (it.type === 'section') return editSection(it);
     if (it.type === 'input') return pickInputItem(it);
+  }
+
+  function editSection(it) {
+    openDialog({
+      title: 'Service folder',
+      body: '<label class="field"><span>Folder name</span><input id="secTitle" value="' + esc(it.title || '') + '" placeholder="Worship set"></label>' +
+        '<p class="hint">Items below this folder, down to the next folder, belong to it. Click the folder to open or close it. Removing the folder keeps its items.</p>',
+      buttons: [{ label: 'Cancel', cls: 'ghost' }, { label: 'Save', cls: 'primary', onClick: () => act('item/update', { id: it.id, patch: { title: val('secTitle').trim() || 'Folder' } }) }],
+    });
   }
 
   function editDeck(it) {
@@ -547,6 +757,15 @@
     $('order').classList.add('file-over');
   });
   $('order').addEventListener('dragleave', (e) => { if (!$('order').contains(e.relatedTarget)) $('order').classList.remove('file-over'); });
+  // A song dragged from the library onto the service order is added after the selected item.
+  $('order').addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('application/x-lectern-song')) { e.preventDefault(); $('order').classList.add('file-over'); } });
+  $('order').addEventListener('drop', (e) => {
+    const id = e.dataTransfer.getData('application/x-lectern-song');
+    if (!id) return;
+    e.preventDefault();
+    $('order').classList.remove('file-over');
+    addItem({ type: 'song', songId: id });
+  });
   $('order').addEventListener('drop', async (e) => {
     if (!e.dataTransfer.files.length) return;
     e.preventDefault();
@@ -754,7 +973,8 @@
         '<label class="field"><span>Title</span><input id="sgTitle" value="' + esc(s.title) + '"></label>' +
         '<label class="field"><span>Author</span><input id="sgAuthor" value="' + esc(s.author) + '"></label>' +
         '<label class="field"><span>Copyright</span><input id="sgCopy" value="' + esc(s.copyright) + '"></label>' +
-        '<label class="field"><span>CCLI song number</span><input id="sgCcli" value="' + esc(s.ccli) + '"></label></div>' +
+        '<label class="field"><span>CCLI song number</span><input id="sgCcli" value="' + esc(s.ccli) + '"></label>' +
+        '<label class="field"><span>Folder</span><select id="sgFolder"><option value="">Unfiled</option>' + folderList('songs').map((f) => '<option value="' + esc(f) + '"' + ((s.folder || (isNew && $('songFolder').value !== '*' ? $('songFolder').value : '')) === f ? ' selected' : '') + '>' + esc(f) + '</option>').join('') + '</select></label></div>' +
         '<div class="split"><label class="field"><span>Lyrics</span><textarea id="sgLyrics" rows="18" spellcheck="false">' + esc(s.lyrics) + '</textarea>' +
         '<small>Start each section with a label in brackets, such as [Verse 1] or [Chorus]. A blank line starts a new slide.</small></label>' +
         '<div class="field"><span>Slides</span><div class="pv-list" id="sgPrev"></div></div></div>' +
@@ -777,7 +997,7 @@
       },
     });
     async function save() {
-      const out = { ...s, title: val('sgTitle').trim(), author: val('sgAuthor').trim(), copyright: val('sgCopy').trim(), ccli: val('sgCcli').trim(), lyrics: val('sgLyrics'), arrangement: val('sgArr').trim() };
+      const out = { ...s, title: val('sgTitle').trim(), author: val('sgAuthor').trim(), copyright: val('sgCopy').trim(), ccli: val('sgCcli').trim(), lyrics: val('sgLyrics'), arrangement: val('sgArr').trim(), folder: val('sgFolder') || undefined };
       const id = await act('song/save', { song: out });
       if (id) toast('Song saved');
       return id;
@@ -817,14 +1037,15 @@
     openDialog({
       title: 'Scripture',
       body:
-        '<div class="fields"><label class="field"><span>Reference (KJV)</span><input id="scRef" value="' + esc(it.ref || '') + '"></label>' +
+        '<div class="fields"><label class="field"><span>Reference</span><input id="scRef" value="' + esc(it.ref || '') + '"></label>' +
+        '<label class="field"><span>Translation</span><select id="scTr">' + (st.bibles || []).map((t) => '<option value="' + esc(t.id) + '"' + (t.id === (it.translation || 'KJV') ? ' selected' : '') + '>' + esc(t.id) + ' · ' + esc(t.name) + '</option>').join('') + '</select></label>' +
         '<label class="field"><span>Max characters per slide</span><input id="scMax" type="number" min="60" max="800" value="' + (it.maxChars || 240) + '"></label></div>' +
         '<label class="check"><input type="checkbox" id="scNums"' + (it.verseNumbers !== false ? ' checked' : '') + '> Show verse numbers</label>',
       buttons: [{ label: 'Cancel', cls: 'ghost' }, {
         label: 'Save', cls: 'primary', onClick: async () => {
-          const r = await act('bible/lookup', { ref: val('scRef') });
+          const r = await act('bible/lookup', { ref: val('scRef'), translation: val('scTr') });
           if (!r) return false;
-          await act('item/update', { id: it.id, patch: { ref: r.ref, verses: r.verses, translation: r.translation, maxChars: Number(val('scMax')) || 240, verseNumbers: val('scNums') } });
+          await act('item/update', { id: it.id, patch: { ref: r.ref, verses: r.verses, translation: r.translation, copyright: copyrightLine(r) || null, maxChars: Number(val('scMax')) || 240, verseNumbers: val('scNums') } });
         },
       }],
     });
@@ -1041,6 +1262,7 @@
     renderSongs();
     renderMedia();
     renderInputs();
+    renderBibleTranslations();
     $('chatUndo').disabled = !(st.claude && st.claude.canUndo);
     $('chatUndo').title = st.claude && st.claude.canUndo ? 'Undo: ' + st.claude.canUndo : 'Nothing to undo';
     $('textLayoutBtn').disabled = !findItem(sel);

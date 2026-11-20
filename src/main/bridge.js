@@ -44,8 +44,9 @@ const TOOLS = [
   { name: 'import_songs', kind: CHANGE, description: 'Import song lyric text files (SongSelect .txt) into the song library.', input_schema: { type: 'object', properties: { paths: { type: 'array', items: { type: 'string' } } }, required: ['paths'] } },
   { name: 'import_powerpoint', kind: CHANGE, description: 'Import a PowerPoint file into the service, as editable text slides or as pictures of each slide.', input_schema: { type: 'object', properties: { path: { type: 'string' }, mode: { type: 'string', enum: ['text', 'pictures'] } }, required: ['path', 'mode'] } },
   { name: 'set_background', kind: CHANGE, description: 'Set a background (media name, preset such as "preset:aurora", or "input:<id>"). With no item, sets the service default. With from_slide, it applies from that slide onward in the item. Use "none" to remove.', input_schema: { type: 'object', properties: { media: { type: 'string' }, item: { type: 'string' }, from_slide: { type: 'integer', description: 'Slide number, 1 = first' } }, required: ['media'] } },
-  { name: 'add_to_service', kind: CHANGE, description: 'Add an item to the service order.', input_schema: { type: 'object', properties: { type: { type: 'string', enum: ['song', 'scripture', 'text', 'media', 'countdown', 'blank', 'input'] }, song: { type: 'string', description: 'Song title (for type song)' }, reference: { type: 'string', description: 'Bible reference, e.g. John 3:16-18' }, title: { type: 'string' }, text: { type: 'string', description: 'For text: heading on the first line, a line with --- between slides' }, media: { type: 'string' }, input: { type: 'string', description: 'NDI input name or id' }, target_time: { type: 'string', description: 'HH:MM for countdown' }, after_item: { type: 'string' } }, required: ['type'] } },
-  { name: 'create_song', kind: CHANGE, description: 'Add a song to the library. Lyrics use [Verse 1], [Chorus] section labels and a blank line between slides.', input_schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' }, author: { type: 'string' }, copyright: { type: 'string' }, ccli: { type: 'string' }, add_to_service: { type: 'boolean' } }, required: ['title', 'lyrics'] } },
+  { name: 'add_to_service', kind: CHANGE, description: 'Add an item to the service order. type "folder" adds a folder that groups the items under it.', input_schema: { type: 'object', properties: { type: { type: 'string', enum: ['song', 'scripture', 'text', 'media', 'countdown', 'blank', 'input', 'folder'] }, song: { type: 'string', description: 'Song title (for type song)' }, reference: { type: 'string', description: 'Bible reference, e.g. John 3:16-18' }, translation: { type: 'string', description: 'Bible translation short name from get_overview, e.g. KJV or BSB; omit for the default' }, title: { type: 'string' }, text: { type: 'string', description: 'For text: heading on the first line, a line with --- between slides' }, media: { type: 'string' }, input: { type: 'string', description: 'NDI input name or id' }, target_time: { type: 'string', description: 'HH:MM for countdown' }, after_item: { type: 'string' } }, required: ['type'] } },
+  { name: 'create_song', kind: CHANGE, description: 'Add a song to the library. Lyrics use [Verse 1], [Chorus] section labels and a blank line between slides.', input_schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' }, author: { type: 'string' }, copyright: { type: 'string' }, ccli: { type: 'string' }, folder: { type: 'string', description: 'Song folder (created if needed)' }, add_to_service: { type: 'boolean' } }, required: ['title', 'lyrics'] } },
+  { name: 'move_to_folder', kind: CHANGE, description: 'Put songs or media files into a library folder (created if needed). folder "" moves them to Unfiled.', input_schema: { type: 'object', properties: { kind: { type: 'string', enum: ['songs', 'media'] }, items: { type: 'array', items: { type: 'string' }, description: 'Song titles or media file names' }, folder: { type: 'string' } }, required: ['kind', 'items', 'folder'] } },
   { name: 'remove_item', kind: CHANGE, description: 'Remove an item from the service order (songs stay in the library).', input_schema: { type: 'object', properties: { item: { type: 'string' } }, required: ['item'] } },
   { name: 'move_item', kind: CHANGE, description: 'Move an item to a new position (1 = first).', input_schema: { type: 'object', properties: { item: { type: 'string' }, position: { type: 'integer' } }, required: ['item', 'position'] } },
   { name: 'set_video_speed', kind: CHANGE, description: 'Playback speed for a video (0.5 to 2, 1 = normal). audio_follows_video false keeps the sound at normal speed.', input_schema: { type: 'object', properties: { media: { type: 'string' }, speed: { type: 'number' }, audio_follows_video: { type: 'boolean' } }, required: ['media', 'speed'] } },
@@ -176,8 +177,9 @@ class Bridge {
         case 'import_songs': return 'Import ' + a.paths.length + ' song file(s).';
         case 'import_powerpoint': return 'Import "' + path.basename(a.path) + '" as ' + (a.mode === 'pictures' ? 'pictures' : 'text slides') + ' and add it to the service.';
         case 'set_background': return 'Set background "' + a.media + '"' + (a.item ? ' for "' + this.title(this.findItem(a.item)) + '"' + (a.from_slide ? ' from slide ' + a.from_slide + ' onward' : '') : ' as the service default') + '.';
-        case 'add_to_service': return 'Add ' + (a.song || a.reference || a.title || a.media || a.input || a.type) + ' to the service.';
-        case 'create_song': return 'Add the song "' + a.title + '" to the library' + (a.add_to_service ? ' and the service' : '') + '.';
+        case 'add_to_service': return 'Add ' + (a.type === 'folder' ? 'the folder "' + (a.title || 'Folder') + '"' : (a.song || (a.reference ? a.reference + (a.translation ? ' (' + a.translation.toUpperCase() + ')' : '') : '') || a.title || a.media || a.input || a.type)) + ' to the service.';
+        case 'create_song': return 'Add the song "' + a.title + '" to the library' + (a.folder ? ' in the folder "' + a.folder + '"' : '') + (a.add_to_service ? ' and the service' : '') + '.';
+        case 'move_to_folder': return 'Move ' + (a.items || []).map((x) => '"' + x + '"').join(', ') + ' to ' + (a.folder ? 'the ' + (a.kind === 'media' ? 'media' : 'song') + ' folder "' + a.folder + '"' : 'Unfiled') + '.';
         case 'remove_item': return 'Remove "' + this.title(this.findItem(a.item)) + '" from the service.';
         case 'move_item': return 'Move "' + this.title(this.findItem(a.item)) + '" to position ' + a.position + '.';
         case 'set_video_speed': return 'Play "' + a.media + '" at ' + a.speed + '×' + (a.audio_follows_video === false ? ', sound at normal speed' : '') + '.';
@@ -262,7 +264,12 @@ class Bridge {
           media: this.ctx.store.listMedia(),
           background_presets: ['preset:aurora', 'preset:ember', 'preset:forest', 'preset:slate', 'preset:black'],
           video_speeds: d.service.mediaOptions || {},
-          songs_in_library: d.library.songs.map((s) => s.title),
+          songs_in_library: d.library.songs.map((s) => (s.folder ? s.title + ' [' + s.folder + ']' : s.title)),
+          song_folders: d.settings.songFolders || [],
+          media_folders: d.settings.mediaFolders || [],
+          media_in_folders: d.settings.mediaFolder || {},
+          bible_translations: (this.ctx.bibles ? this.ctx.bibles() : []).map((t) => t.id + ' (' + t.name + ')'),
+          default_translation: d.settings.bibleTranslation || 'KJV',
           inputs: (d.settings.inputs || []).map((x) => ({ id: x.id, name: x.name, source: x.source, audio: !!x.audio, volume: x.volume == null ? 1 : x.volume })),
           outputs: d.outputs.map((o) => ({ number: o.id, name: o.name, look: o.look, enabled: o.enabled, text_size: o.fontScale || 1 })),
         };
@@ -332,7 +339,8 @@ class Bridge {
             item = { type: 'song', songId: song.id };
             break;
           }
-          case 'scripture': { const r = await dispatch('bible/lookup', { ref: a.reference }); item = { type: 'scripture', ref: r.ref, translation: r.translation, verses: r.verses }; break; }
+          case 'scripture': { const r = await dispatch('bible/lookup', { ref: a.reference, translation: a.translation }); item = { type: 'scripture', ref: r.ref, translation: r.translation, verses: r.verses, copyright: r.copyright && !/^public domain$/i.test(r.copyright) ? r.copyright : undefined }; break; }
+          case 'folder': item = { type: 'section', title: a.title || 'Folder' }; break;
           case 'text': item = { type: 'announce', title: a.title || undefined, text: a.text || a.title || '', lobby: false }; break;
           case 'media': item = { type: 'media', media: this.findMedia(a.media) }; break;
           case 'countdown': item = { type: 'countdown', label: a.title || 'Service begins in', target: a.target_time || '10:30' }; break;
@@ -342,9 +350,21 @@ class Bridge {
         return { id: await dispatch('item/add', { item, after }) };
       }
       case 'create_song': {
-        const id = await dispatch('song/save', { song: { title: a.title, lyrics: a.lyrics, author: a.author || '', copyright: a.copyright || '', ccli: a.ccli || '', arrangement: '' } });
+        if (a.folder) await dispatch('folder/create', { kind: 'songs', name: a.folder });
+        const id = await dispatch('song/save', { song: { title: a.title, lyrics: a.lyrics, author: a.author || '', copyright: a.copyright || '', ccli: a.ccli || '', arrangement: '', ...(a.folder ? { folder: a.folder.trim() } : {}) } });
         if (a.add_to_service) await dispatch('item/add', { item: { type: 'song', songId: id } });
         return { id };
+      }
+      case 'move_to_folder': {
+        const ids = (a.items || []).map((ref) => {
+          if (a.kind === 'media') return this.findMedia(ref);
+          const s = String(ref).toLowerCase();
+          const song = d.library.songs.find((x) => x.title.toLowerCase() === s) || d.library.songs.find((x) => x.title.toLowerCase().includes(s));
+          if (!song) throw new Error('No song in the library matches "' + ref + '".');
+          return song.id;
+        });
+        await dispatch('folder/assign', { kind: a.kind === 'media' ? 'media' : 'songs', items: ids, folder: a.folder || null });
+        return 'ok';
       }
       case 'remove_item': await dispatch('item/remove', { id: this.findItem(a.item).id }); return 'ok';
       case 'move_item': await dispatch('item/move', { id: this.findItem(a.item).id, to: Math.max(0, Math.min(this.items().length - 1, (a.position | 0) - 1)) }); return 'ok';

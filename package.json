@@ -1,7 +1,7 @@
 {
   "name": "lectern",
   "productName": "Lectern",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Worship presentation software with six NDI outputs",
   "main": "src/main/main.js",
   "author": "Lectern",

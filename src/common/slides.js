@@ -80,7 +80,7 @@
       const a = chunk[0], b = chunk[chunk.length - 1];
       const ref = a.book + ' ' + a.chapter + ':' + a.verse + (b.verse !== a.verse ? '-' + b.verse : '') + (item.translation ? ' ' + item.translation : '');
       const text = chunk.map((v) => (item.verseNumbers === false ? '' : '<sup>' + (v.verse | 0) + '</sup>') + escHtml(v.text)).join(' ');
-      out.push({ kind: 'scripture', group: ref.replace(/\s\S+$/, ''), color: '#d6a02c', text, ref, html: true });
+      out.push({ kind: 'scripture', group: ref.replace(/\s\S+$/, ''), color: '#d6a02c', text, ref, html: true, footer: item.copyright || undefined });
       chunk = []; len = 0;
     };
     verses.forEach((v) => {
@@ -120,6 +120,8 @@
         return [{ kind: 'input', group: 'Input', color: '#1f9bd1', input: item.input }];
       case 'blank':
         return [{ kind: 'blank', group: 'Blank', color: '#3a3f47' }];
+      case 'section':
+        return []; // a folder in the service order: groups the items under it
       default: return [];
     }
   }
@@ -147,7 +149,7 @@
       return song ? song.title : 'Missing song';
     }
     if (item.type === 'scripture') return item.ref || 'Scripture';
-    return { announce: 'Announcements', countdown: 'Countdown', media: item.media || 'Media', blank: 'Blank', deck: 'PowerPoint', input: 'NDI input' }[item.type] || 'Item';
+    return { announce: 'Announcements', countdown: 'Countdown', media: item.media || 'Media', blank: 'Blank', deck: 'PowerPoint', input: 'NDI input', section: 'Folder' }[item.type] || 'Item';
   }
 
   // Background for one slide: the last background dropped on this slide or an earlier one,

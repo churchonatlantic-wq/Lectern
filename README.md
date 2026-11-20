@@ -6,10 +6,10 @@ Worship presentation software for Windows and macOS with **six independent outpu
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 (64-bit) | `Lectern-Setup-1.1.2.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
-| Windows (portable) | `Lectern-1.1.2-win.zip` | Unzip anywhere and run `Lectern.exe`. |
-| Mac (Apple Silicon and Intel) | `Lectern-1.1.2-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
-| Mac (zip) | `Lectern-1.1.2-universal-mac.zip` | Same app as the DMG, zipped. |
+| Windows 10/11 (64-bit) | `Lectern-Setup-1.2.0.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
+| Windows (portable) | `Lectern-1.2.0-win.zip` | Unzip anywhere and run `Lectern.exe`. |
+| Mac (Apple Silicon and Intel) | `Lectern-1.2.0-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
+| Mac (zip) | `Lectern-1.2.0-universal-mac.zip` | Same app as the DMG, zipped. |
 
 **NDI:** install the free [NDI Tools](https://ndi.video/tools/) (or the NDI 6 Runtime) on the presentation computer. Lectern finds the NDI library automatically. If it is somewhere unusual, set its location under Settings → NDI. Without NDI, screen outputs and previews still work, and a banner explains what's missing.
 
@@ -31,10 +31,21 @@ When macOS asks to let Lectern find devices on your local network, click **Allow
 - **Right column:** live and up-next monitors, stage timer, audience message, a private stage message, NDI inputs and the Claude chat panel.
 - **Outputs (bottom):** turn each output on or off. The ⚙ button sets the look, resolution, frame rate, NDI groups, transparency and an optional screen.
 - **Songs:** in the lyrics, use `[Verse 1]`, `[Chorus]` and so on to start sections, and a blank line to start a new slide. The arrangement field reorders sections. Import accepts SongSelect `.txt` files.
-- **Bible:** the King James Version is built in. Type a reference such as `Psalm 23`, `John 3:16-18` or `1 Cor 13:4-7`.
+- **Bible:** pick a translation in the Bible tab and type a reference such as `Psalm 23`, `John 3:16-18` or `1 Cor 13:4-7`. See "Bible translations" below.
 - **Phone remote:** open the address shown at the bottom right on a phone on the same network and enter the PIN (Settings → Phone remote).
 - **CCLI:** song uses are logged when a song first goes live. Export them under Settings or File → Export CCLI Usage.
 - **Files:** File → Save stores a `.lectern` file that contains the service and its songs.
+
+### Folders
+
+- **Songs and media:** in the Songs and Media tabs, **+ Folder** makes a folder, and the menu next to it filters by folder. Drag a song or a media thumbnail onto a folder's name to move it there, or pick its folder in the song editor or the media menu. Click a folder's name to open or close it. **⋯** renames or deletes folders; deleting a folder moves its contents to Unfiled. Media imported while a folder is selected goes into that folder.
+- **Service order:** **+ Add → Folder (group items)** adds a folder row. The items below it, down to the next folder, belong to it. Click the folder to open or close it. Next and Back skip folder rows.
+- You can also drag a song from the library straight onto the service order.
+
+### Bible translations
+
+- **Built in (public domain):** King James Version (KJV), Berean Standard Bible (BSB), American Standard Version (ASV) and Young's Literal Translation (YLT). Pick one in the Bible tab; Lectern remembers your choice. A scripture item's ✎ editor can switch its translation.
+- **Copyrighted translations** such as NIV, NKJV, NASB, NLT, ESV and The Message can only be used under a licence from their publisher, so they cannot be included with Lectern. If your church has a licence and a Bible file for one, click **Translations…** in the Bible tab, choose the file, give it a short name and its copyright notice, and click **Import**. Lectern reads OpenSong XML, Zefania XML, OSIS XML and JSON Bible files. The copyright notice appears on the scripture slides.
 
 ### Panels
 
@@ -128,7 +139,7 @@ npm start
 
 - Windows installer, on Windows: `npm run dist:win`.
 - Universal, signed DMG, on a Mac: `npm run dist:mac`. Set `CSC_LINK`/`CSC_KEY_PASSWORD` to sign, and `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` to notarize.
-- Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.1.2.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
+- Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.2.0.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
 - CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`. To publish them, type a release tag (for example `v1.1.2`) in **Release tag** when you start the run: the installers are attached to that release, which is created if it doesn't exist. Pushing a `v*` tag does the same for that tag.
 
 ### NDI loopback test

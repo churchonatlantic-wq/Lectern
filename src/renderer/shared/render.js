@@ -54,11 +54,30 @@
       default: return '';
     }
   }
+  // Hex colour plus opacity (0-1) as rgba().
+  function rgba(hex, op) {
+    const m = String(hex || '').match(/^#?([0-9a-f]{6})$/i);
+    if (!m) return esc(hex || 'transparent').replace(/;/g, '');
+    const n = parseInt(m[1], 16);
+    return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + Math.max(0, Math.min(1, op == null ? 1 : +op)) + ')';
+  }
+  // Fill, border and corner shape of a box (text boxes can have one too).
+  function shapeStyle(b) {
+    let st = '';
+    if (b.fill) st += 'background:' + rgba(b.fill, b.fillOpacity) + ';';
+    if (b.borderWidth > 0) st += 'border:' + (+b.borderWidth) + 'cqh solid ' + rgba(b.borderColor || '#ffffff', 1) + ';';
+    if (b.shape === 'ellipse') st += 'border-radius:50%;';
+    else if (b.shape === 'rounded') st += 'border-radius:' + (b.radius != null ? +b.radius : 2) + 'cqh;';
+    if (b.fill || b.borderWidth > 0) st += 'padding:' + (b.pad != null ? +b.pad : 1.2) + 'cqh ' + (b.pad != null ? +b.pad * 1.5 : 1.8) + 'cqh;';
+    return st;
+  }
   function layoutHTML(slide, layout) {
     return (layout.boxes || []).map((b) => {
+      const pos = 'left:' + (+b.x || 0) + '%;top:' + (+b.y || 0) + '%;width:' + (+b.w || 10) + '%;height:' + (+b.h || 10) + '%;';
+      if (b.role === 'shape') return '<div class="tb-shape" style="' + pos + shapeStyle({ fill: '#ffffff', ...b, pad: 0 }) + (b.opacity != null ? 'opacity:' + (+b.opacity) + ';' : '') + '"></div>';
       const html = boxContent(slide, b.role, b);
       if (!html) return '';
-      const st = 'left:' + (+b.x || 0) + '%;top:' + (+b.y || 0) + '%;width:' + (+b.w || 10) + '%;height:' + (+b.h || 10) + '%;' +
+      const st = pos + shapeStyle(b) +
         '--bs:' + (+b.size || 5) + ';text-align:' + (b.align || 'center') + ';justify-content:' + ({ top: 'flex-start', bottom: 'flex-end' }[b.valign] || 'safe center') + ';' +
         (b.font ? 'font-family:' + esc(b.font).replace(/;/g, '') + ';' : '') + (b.color ? 'color:' + esc(b.color).replace(/;/g, '') + ';' : '') +
         'font-weight:' + (b.bold === false ? 500 : 700) + ';' + (b.italic ? 'font-style:italic;' : '') + (b.opacity != null ? 'opacity:' + (+b.opacity) + ';' : '') +

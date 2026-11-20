@@ -91,6 +91,23 @@ function load(customPath) {
     allow_video_fields: 'bool',
     p_ndi_recv_name: 'const char *',
   });
+  // Received frames must be handed back to NDI exactly as NDI filled them in, so every pointer
+  // (including the metadata) stays a raw pointer here. Declaring the metadata as a string
+  // would make koffi pass NDI a temporary copy when the frame is freed, which corrupts memory.
+  const RecvVideoFrame = koffi.struct('NDIlib_recv_video_frame_v2_t', {
+    xres: 'int',
+    yres: 'int',
+    FourCC: 'uint32_t',
+    frame_rate_N: 'int',
+    frame_rate_D: 'int',
+    picture_aspect_ratio: 'float',
+    frame_format_type: 'int',
+    timecode: 'int64_t',
+    p_data: 'void *',
+    line_stride_in_bytes: 'int',
+    p_metadata: 'void *',
+    timestamp: 'int64_t',
+  });
   const AudioFrame = koffi.struct('NDIlib_audio_frame_v2_t', {
     sample_rate: 'int',
     no_channels: 'int',
@@ -98,7 +115,7 @@ function load(customPath) {
     timecode: 'int64_t',
     p_data: 'void *',
     channel_stride_in_bytes: 'int',
-    p_metadata: 'const char *',
+    p_metadata: 'void *',
     timestamp: 'int64_t',
   });
 
@@ -115,8 +132,8 @@ function load(customPath) {
     findSources: lib.func('void *NDIlib_find_get_current_sources(void *p_instance, _Out_ uint32_t *p_no_sources)'),
     recvCreate: lib.func('void *NDIlib_recv_create_v3(const NDIlib_recv_create_v3_t *p_create_settings)'),
     recvDestroy: lib.func('void NDIlib_recv_destroy(void *p_instance)'),
-    recvCapture: lib.func('int NDIlib_recv_capture_v2(void *p_instance, _Out_ NDIlib_video_frame_v2_t *p_video_data, _Out_ NDIlib_audio_frame_v2_t *p_audio_data, void *p_metadata, uint32_t timeout_in_ms)'),
-    freeVideo: lib.func('void NDIlib_recv_free_video_v2(void *p_instance, const NDIlib_video_frame_v2_t *p_video_data)'),
+    recvCapture: lib.func('int NDIlib_recv_capture_v2(void *p_instance, _Out_ NDIlib_recv_video_frame_v2_t *p_video_data, _Out_ NDIlib_audio_frame_v2_t *p_audio_data, void *p_metadata, uint32_t timeout_in_ms)'),
+    freeVideo: lib.func('void NDIlib_recv_free_video_v2(void *p_instance, const NDIlib_recv_video_frame_v2_t *p_video_data)'),
     freeAudio: lib.func('void NDIlib_recv_free_audio_v2(void *p_instance, const NDIlib_audio_frame_v2_t *p_audio_data)'),
   };
   if (!api.initialize()) {
@@ -124,7 +141,7 @@ function load(customPath) {
     err.code = 'NDI_INIT_FAILED';
     throw err;
   }
-  cached = { api, libPath, version: api.version(), types: { SendCreate, VideoFrame, Tally, Source, FindCreate, RecvCreate, AudioFrame } };
+  cached = { api, libPath, version: api.version(), types: { SendCreate, VideoFrame, Tally, Source, FindCreate, RecvCreate, RecvVideoFrame, AudioFrame } };
   return cached;
 }
 

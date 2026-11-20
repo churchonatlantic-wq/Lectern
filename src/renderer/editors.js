@@ -6,7 +6,7 @@
   const S = window.LecternSlides;
   const R = window.LecternRender;
   const esc = R.esc;
-  const ROLE_LABEL = { text: 'Main text', secondary: 'Reference / body', footer: 'Song credits', custom: 'Fixed text' };
+  const ROLE_LABEL = { text: 'Main text', secondary: 'Reference / body', footer: 'Song credits', custom: 'Fixed text', shape: 'Shape' };
   const FONTS = ['Segoe UI', 'Arial', 'Helvetica Neue', 'Georgia', 'Times New Roman', 'Verdana', 'Trebuchet MS', 'Tahoma', 'Calibri', 'Cambria', 'Garamond', 'Futura', 'Avenir Next', 'Gill Sans', 'Montserrat', 'Open Sans', 'Lato', 'Roboto'];
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const uid = () => Math.random().toString(16).slice(2, 10);
@@ -36,7 +36,9 @@
         '<div class="tl-side">' +
         '<label class="field"><span>Start from</span><select id="tlPreset"><option value="">' + (current && !current.id ? 'This item’s current layout' : 'Built-in layout') + '</option>' +
         presets.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === loadedPreset ? ' selected' : '') + '>Preset: ' + esc(p.name) + '</option>').join('') + '</select></label>' +
-        '<div class="field"><span>Boxes</span><div class="tl-list" id="tlList"></div><div class="row"><button class="btn small ghost" id="tlAdd">+ Fixed text box</button><button class="btn small ghost" id="tlDel">Delete box</button></div></div>' +
+        '<div class="field"><span>Boxes and shapes</span><div class="tl-list" id="tlList"></div>' +
+        '<div class="row" style="flex-wrap:wrap"><button class="btn small ghost" id="tlAdd">+ Text box</button><button class="btn small ghost" id="tlAddShape">+ Shape</button><button class="btn small ghost" id="tlDel">Delete</button></div>' +
+        '<div class="row"><button class="btn small ghost" id="tlFwd" title="Bring the selected box in front">Bring forward</button><button class="btn small ghost" id="tlBack" title="Send the selected box behind">Send back</button></div></div>' +
         '<div class="tl-props" id="tlProps"></div>' +
         '<div class="field"><span>Save as a text preset</span><div class="row"><input id="tlName" placeholder="Preset name" value="' + esc(loadedPreset ? (presets.find((p) => p.id === loadedPreset) || {}).name || '' : '') + '"><button class="btn small" id="tlSave">Save</button></div>' +
         '<div class="row"><button class="btn small ghost danger" id="tlDelPreset"' + (loadedPreset ? '' : ' hidden') + '>Delete this preset</button></div></div>' +
@@ -60,7 +62,7 @@
             background: S.slideBackground(item, Math.max(0, slideIdx), C.st.settings), layers: { slide: true, media: true, props: false, msg: false, stage: false },
           }, { look: 'main', fontScale: 1, showProps: false, showMessages: false });
           boxesEl.innerHTML = work.boxes.map((b) => '<div class="tl-box' + (b.id === selId ? ' is-sel' : '') + '" data-b="' + esc(b.id) + '" style="left:' + b.x + '%;top:' + b.y + '%;width:' + b.w + '%;height:' + b.h + '%">' +
-            '<span class="tl-tag">' + esc(ROLE_LABEL[b.role] || b.role) + ' · ' + (+b.size).toFixed(1) + '</span>' +
+            '<span class="tl-tag">' + esc(ROLE_LABEL[b.role] || b.role) + (b.role === 'shape' ? '' : ' · ' + (+b.size).toFixed(1)) + '</span>' +
             (b.id === selId ? ['nw', 'ne', 'sw', 'se'].map((h) => '<span class="tl-h" data-h="' + h + '"></span>').join('') : '') + '</div>').join('');
           body.querySelector('#tlList').innerHTML = work.boxes.map((b) => '<button class="btn small' + (b.id === selId ? ' on' : '') + '" data-pick="' + esc(b.id) + '">' + esc(ROLE_LABEL[b.role] || b.role) + '</button>').join('');
           body.querySelector('#tlDel').disabled = !selId;
@@ -70,8 +72,18 @@
           const b = work.boxes.find((x) => x.id === selId);
           const el = body.querySelector('#tlProps');
           if (!b) { el.innerHTML = '<span class="hint">Pick a box to change it.</span>'; return; }
+          const shapeOpts = (cur, withNone) => (withNone ? '<option value="">None</option>' : '') + [['rect', 'Rectangle'], ['rounded', 'Rounded rectangle'], ['ellipse', 'Ellipse / circle']].map(([v, l]) => '<option value="' + v + '"' + ((cur || '') === v ? ' selected' : '') + '>' + l + '</option>').join('');
+          const fillFields = (isShape) =>
+            '<div class="two"><label class="field"><span>' + (isShape ? 'Shape' : 'Background shape') + '</span><select data-k="shape">' + shapeOpts(isShape ? (b.shape || 'rect') : (b.fill || b.borderWidth ? b.shape || 'rect' : ''), !isShape) + '</select></label>' +
+            '<label class="field"><span>Corner size</span><input type="number" min="0" max="20" step="0.5" data-k="radius" value="' + (b.radius != null ? b.radius : 2) + '"' + (b.shape === 'rounded' ? '' : ' disabled') + '></label></div>' +
+            '<div class="two"><label class="field"><span>Fill colour</span><input type="color" data-k="fill" value="' + esc(b.fill || (isShape ? '#ffffff' : '#000000')) + '"></label>' +
+            '<label class="field"><span>Fill opacity <b data-fo>' + Math.round((b.fillOpacity == null ? 1 : b.fillOpacity) * 100) + '%</b></span><input type="range" min="0" max="1" step="0.05" data-k="fillOpacity" value="' + (b.fillOpacity == null ? 1 : b.fillOpacity) + '"></label></div>' +
+            '<div class="two"><label class="field"><span>Border width</span><input type="number" min="0" max="5" step="0.1" data-k="borderWidth" value="' + (b.borderWidth || 0) + '"></label>' +
+            '<label class="field"><span>Border colour</span><input type="color" data-k="borderColor" value="' + esc(b.borderColor || '#ffffff') + '"></label></div>';
+          const posFields = '<div class="two">' + ['x', 'y', 'w', 'h'].map((k) => '<label class="field"><span>' + { x: 'Left %', y: 'Top %', w: 'Width %', h: 'Height %' }[k] + '</span><input type="number" step="0.5" min="0" max="100" data-k="' + k + '" value="' + (+b[k]).toFixed(1) + '"></label>').join('') + '</div>';
+          if (b.role === 'shape') { el.innerHTML = fillFields(true) + posFields; return; }
           el.innerHTML =
-            '<label class="field"><span>Shows</span><select data-k="role">' + Object.entries(ROLE_LABEL).map(([k, l]) => '<option value="' + k + '"' + (k === b.role ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
+            '<label class="field"><span>Shows</span><select data-k="role">' + Object.entries(ROLE_LABEL).filter(([k]) => k !== 'shape').map(([k, l]) => '<option value="' + k + '"' + (k === b.role ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
             (b.role === 'custom' ? '<label class="field"><span>Text</span><textarea data-k="text" rows="2">' + esc(b.text || '') + '</textarea></label>' : '') +
             '<label class="field"><span>Text size <b data-sz>' + (+b.size).toFixed(1) + '</b> (% of screen height)</span><input type="range" min="1" max="20" step="0.1" data-k="size" value="' + b.size + '"></label>' +
             '<label class="field"><span>Font</span><input data-k="font" list="tlFonts" value="' + esc(b.font || '') + '" placeholder="Service font"><datalist id="tlFonts">' + FONTS.map((f) => '<option value="' + f + '">').join('') + '</datalist></label>' +
@@ -82,7 +94,7 @@
             '<div class="row"><label class="check"><input type="checkbox" data-k="bold"' + (b.bold !== false ? ' checked' : '') + '> Bold</label>' +
             '<label class="check"><input type="checkbox" data-k="italic"' + (b.italic ? ' checked' : '') + '> Italic</label>' +
             '<label class="check"><input type="checkbox" data-k="upper"' + (b.upper ? ' checked' : '') + '> Uppercase</label></div>' +
-            '<div class="two">' + ['x', 'y', 'w', 'h'].map((k) => '<label class="field"><span>' + { x: 'Left %', y: 'Top %', w: 'Width %', h: 'Height %' }[k] + '</span><input type="number" step="0.5" min="0" max="100" data-k="' + k + '" value="' + (+b[k]).toFixed(1) + '"></label>').join('') + '</div>';
+            fillFields(false) + posFields;
         };
 
         body.querySelector('#tlProps').addEventListener('input', (e) => {
@@ -92,6 +104,15 @@
           if (k === 'themeColor') { if (e.target.checked) delete b.color; else b.color = body.querySelector('[data-k="color"]').value; }
           else if (k === 'color') { b.color = e.target.value; body.querySelector('[data-k="themeColor"]').checked = false; }
           else if (['bold', 'italic', 'upper'].includes(k)) b[k] = e.target.checked;
+          else if (k === 'shape') {
+            if (!e.target.value) { delete b.shape; delete b.fill; delete b.borderWidth; }
+            else { b.shape = e.target.value; if (!b.fill && !b.borderWidth) { b.fill = body.querySelector('[data-k="fill"]').value; if (b.fillOpacity == null) b.fillOpacity = b.role === 'shape' ? 1 : 0.6; } }
+            props();
+          } else if (k === 'fill') { b.fill = e.target.value; if (!b.shape) b.shape = 'rect'; if (b.fillOpacity == null && b.role !== 'shape') b.fillOpacity = 0.6; }
+          else if (k === 'fillOpacity') { b.fillOpacity = Number(e.target.value); if (!b.fill) b.fill = body.querySelector('[data-k="fill"]').value; if (!b.shape) b.shape = 'rect'; body.querySelector('[data-fo]').textContent = Math.round(b.fillOpacity * 100) + '%'; }
+          else if (k === 'borderWidth') { b.borderWidth = Math.max(0, Math.min(5, Number(e.target.value) || 0)); if (b.borderWidth && !b.shape) b.shape = 'rect'; }
+          else if (k === 'borderColor') b.borderColor = e.target.value;
+          else if (k === 'radius') b.radius = Math.max(0, Math.min(20, Number(e.target.value) || 0));
           else if (['size', 'x', 'y', 'w', 'h'].includes(k)) { b[k] = Math.max(0, Math.min(k === 'size' ? 20 : 100, Number(e.target.value) || 0)); if (k === 'size') body.querySelector('[data-sz]').textContent = b.size.toFixed(1); }
           else if (k === 'font') { if (e.target.value.trim()) b.font = e.target.value.trim(); else delete b.font; }
           else b[k] = e.target.value;
@@ -107,6 +128,19 @@
           const b = { id: uid(), role: 'custom', text: 'Your text', x: 30, y: 40, w: 40, h: 14, size: 5, align: 'center', valign: 'center', bold: true };
           work.boxes.push(b); selId = b.id; render(); props();
         });
+        body.querySelector('#tlAddShape').addEventListener('click', () => {
+          const b = { id: uid(), role: 'shape', shape: 'rect', fill: '#000000', fillOpacity: 0.5, x: 5, y: 62, w: 90, h: 28 };
+          work.boxes.unshift(b); selId = b.id; render(); props();
+        });
+        const restack = (dir) => {
+          const i = work.boxes.findIndex((x) => x.id === selId);
+          const j = i + dir;
+          if (i < 0 || j < 0 || j >= work.boxes.length) return;
+          [work.boxes[i], work.boxes[j]] = [work.boxes[j], work.boxes[i]];
+          render();
+        };
+        body.querySelector('#tlFwd').addEventListener('click', () => restack(1));
+        body.querySelector('#tlBack').addEventListener('click', () => restack(-1));
         body.querySelector('#tlDel').addEventListener('click', () => {
           work.boxes = work.boxes.filter((x) => x.id !== selId); selId = work.boxes[0] && work.boxes[0].id; render(); props();
         });

@@ -568,11 +568,13 @@
     const list = st.settings.inputs || [];
     const status = (st.status.inputs && st.status.inputs.inputs) || {};
     const box = $('inputs');
-    const key = JSON.stringify(list.map((x) => [x.id, x.name, x.source]));
+    const paused = !!(st.status.inputs && st.status.inputs.paused);
+    const key = JSON.stringify([paused, list.map((x) => [x.id, x.name, x.source])]);
     if (box.dataset.key !== key) {
       box.dataset.key = key;
       inputSurfaces.clear();
-      box.innerHTML = list.length ? list.map((x) =>
+      box.innerHTML = (paused && list.length ? '<div class="inp-paused"><span>Lectern closed unexpectedly while NDI inputs were running, so inputs are paused.</span><button class="btn small primary" data-inresume>Resume inputs</button></div>' : '') +
+        (list.length ? list.map((x) =>
         '<div class="inp" data-inp="' + esc(x.id) + '">' +
         '<div class="frame" draggable="true" title="Drag onto a slide to use as its background"><div>' + R.mediaHTML('input:' + x.id) + '</div></div>' +
         '<div class="inp-body"><div class="inp-name"></div><div class="inp-src"></div>' +
@@ -580,7 +582,7 @@
         '<div class="inp-row"><button class="toggle" data-inaudio aria-pressed="false" title="Play this input’s audio">Audio</button>' +
         '<input type="range" min="0" max="2" step="0.05" data-invol aria-label="Input volume"><span class="inp-vol"></span></div></div></div>').join('')
         : '<div class="empty">No NDI inputs yet. Use + NDI input to add a camera, a computer or any other NDI source on the network.' +
-          (st.status.inputs && st.status.inputs.error ? '<br><span class="hint">' + esc(st.status.inputs.error) + '</span>' : '') + '</div>';
+          (st.status.inputs && st.status.inputs.error ? '<br><span class="hint">' + esc(st.status.inputs.error) + '</span>' : '') + '</div>');
     }
     list.forEach((x) => {
       const card = box.querySelector('[data-inp="' + CSS.escape(x.id) + '"]');
@@ -588,7 +590,8 @@
       const s2 = status[x.id] || {};
       card.querySelector('.inp-name').textContent = x.name;
       const ndiErr = st.status.inputs && st.status.inputs.error;
-      const stateText = s2.state === 'live' ? '● ' + s2.w + '×' + s2.h + ' ' + s2.fps + ' fps'
+      const stateText = paused ? 'Paused'
+        : s2.state === 'live' ? '● ' + s2.w + '×' + s2.h + ' ' + s2.fps + ' fps'
         : s2.state === 'error' ? 'Error: ' + (s2.error || '')
           : s2.state === 'no signal' ? 'No signal'
             : !s2.state && ndiErr ? 'NDI runtime not found' : 'Connecting…';
@@ -603,6 +606,7 @@
     R.Surface && window.LecternInputHub.refresh();
   }
   $('inputs').addEventListener('click', (e) => {
+    if (e.target.closest('[data-inresume]')) { act('input/resume'); return; }
     const card = e.target.closest('[data-inp]');
     if (!card) return;
     const id = card.dataset.inp;

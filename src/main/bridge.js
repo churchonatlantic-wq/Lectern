@@ -16,7 +16,10 @@ const READ = 'read';
 const box = {
   type: 'object',
   properties: {
-    role: { type: 'string', enum: ['text', 'secondary', 'footer', 'custom'], description: 'text = lyrics, verses or heading; secondary = scripture reference or text-slide body; footer = song credits; custom = fixed text' },
+    role: { type: 'string', enum: ['text', 'secondary', 'footer', 'custom', 'shape'], description: 'text = lyrics, verses or heading; secondary = scripture reference or text-slide body; footer = song credits; custom = fixed text; shape = a filled shape with no text' },
+    shape: { type: 'string', enum: ['rect', 'rounded', 'ellipse'], description: 'Background shape of the box (for text boxes, only drawn when fill or border is set)' },
+    fill: { type: 'string', description: 'Fill colour, e.g. #000000' }, fillOpacity: { type: 'number', description: '0 to 1' },
+    borderWidth: { type: 'number', description: '% of frame height, 0 for none' }, borderColor: { type: 'string' },
     text: { type: 'string', description: 'Only for custom boxes' },
     x: { type: 'number', description: 'Left edge, % of frame width' },
     y: { type: 'number', description: 'Top edge, % of frame height' },
@@ -288,8 +291,9 @@ class Bridge {
         const existing = this.findPreset(a.name);
         const base = existing ? JSON.parse(JSON.stringify(existing)) : { ...this.ctx.slides.defaultLayout(), name: a.name };
         for (const b of a.boxes || []) {
-          const target = base.boxes.find((x) => x.role === b.role && b.role !== 'custom');
+          const target = base.boxes.find((x) => x.role === b.role && b.role !== 'custom' && b.role !== 'shape');
           if (target) Object.assign(target, b);
+          else if (b.role === 'shape') base.boxes.unshift({ id: crypto.randomBytes(4).toString('hex'), shape: 'rect', fill: '#000000', fillOpacity: 0.5, x: 5, y: 62, w: 90, h: 28, ...b });
           else base.boxes.push({ id: crypto.randomBytes(4).toString('hex'), x: 10, y: 10, w: 80, h: 15, size: 5, align: 'center', valign: 'center', ...b });
         }
         const id = await dispatch('preset/save', { id: existing && existing.id, name: a.name, layout: { boxes: base.boxes } });

@@ -15,6 +15,8 @@
 .tbs { position: absolute; inset: 0; }
 .tb { position: absolute; display: flex; flex-direction: column; overflow: hidden; line-height: 1.22; font-size: calc(var(--bs) * 1cqh * var(--fs) * var(--fit)); }
 .tb > div { text-wrap: balance; }
+.tb, .tb-shape { box-sizing: border-box; }
+.tb-shape { position: absolute; }
 .tb .s-scr-in sup { font-size: .5em; opacity: .7; margin-right: .2em; vertical-align: .6em; line-height: 0; }
 .surface.upper .tb-text { text-transform: uppercase; }
 .surface.shadow .tb { text-shadow: 0 .4cqh 1.6cqh rgba(0,0,0,.7), 0 0 .3cqh rgba(0,0,0,.6); }

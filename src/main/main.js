@@ -526,6 +526,7 @@ async function dispatch(type, p = {}) {
       await inputs.sync();
       return true;
     case 'input/discover': inputs.startDiscovery(); return true;
+    case 'input/resume': await inputs.setPaused(false); return true;
 
     // PowerPoint
     case 'pptx/pick': return pickPowerPoint();
@@ -711,6 +712,7 @@ app.whenReady().then(async () => {
     sendFull: (wcId, frame) => sendTo(wcId, 'input/frame', frame),
     sendPreview: (frame) => { if (control && !control.isDestroyed()) control.webContents.send('input/preview', frame); },
     sendAudio: (m) => { if (audioWin && !audioWin.isDestroyed()) audioWin.webContents.send('input/audio', m); },
+    guardFile: path.join(app.getPath('userData'), 'inputs-running.flag'),
   });
   ipcMain.on('input/want', (e, ids) => inputs.setWant(e.sender.id, Array.isArray(ids) ? ids.map(String) : []));
   ipcMain.on('input/preview-want', (_e, ids) => inputs.setPreview(Array.isArray(ids) ? ids.map(String) : []));

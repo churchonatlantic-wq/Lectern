@@ -47,9 +47,15 @@ class InputReceiver {
   }
 }
 
+const fs = require('fs');
+
 class InputManager {
-  constructor({ getInputs, getSettings, onStatus, sendFull, sendPreview, sendAudio }) {
-    Object.assign(this, { getInputs, getSettings, onStatus, sendFull, sendPreview, sendAudio });
+  // guardFile: present while receivers run; if it is still there at the next start, Lectern
+  // stopped unexpectedly while receiving, so inputs start paused instead of reconnecting.
+  constructor({ getInputs, getSettings, onStatus, sendFull, sendPreview, sendAudio, guardFile }) {
+    Object.assign(this, { getInputs, getSettings, onStatus, sendFull, sendPreview, sendAudio, guardFile });
+    this.paused = false;
+    try { if (guardFile && fs.existsSync(guardFile)) { this.paused = true; log.warn('Lectern did not close normally while NDI inputs were running. Inputs start paused.'); } } catch { /* ignore */ }
     this.receivers = new Map();
     this.wants = new Map(); // webContents id -> Set(input ids)
     this.previewIds = new Set();
@@ -79,8 +85,13 @@ class InputManager {
     this.findTimer.unref?.();
   }
 
+  setPaused(paused) { this.paused = !!paused; return this.sync(); }
+  writeGuard() {
+    if (!this.guardFile) return;
+    try { if (this.receivers.size) fs.writeFileSync(this.guardFile, new Date().toISOString()); else if (fs.existsSync(this.guardFile)) fs.unlinkSync(this.guardFile); } catch { /* ignore */ }
+  }
   async sync() {
-    const list = this.getInputs() || [];
+    const list = this.paused ? [] : (this.getInputs() || []);
     const ids = new Set(list.map((x) => x.id));
     for (const [id, r] of this.receivers) {
       const cfg = list.find((x) => x.id === id);
@@ -91,8 +102,12 @@ class InputManager {
     for (const cfg of list) {
       const r = this.receivers.get(cfg.id);
       if (r) { r.cfg = { ...cfg }; r.applyFlags(); continue; }
-      if (lib && cfg.source) this.receivers.set(cfg.id, new InputReceiver(this, cfg));
+      if (lib && cfg.source) {
+        log.info('Starting NDI input "' + cfg.source + '"');
+        this.receivers.set(cfg.id, new InputReceiver(this, cfg));
+      }
     }
+    this.writeGuard();
     this.statusChanged();
   }
 
@@ -118,12 +133,13 @@ class InputManager {
   statuses() {
     const per = {};
     for (const [id, r] of this.receivers) per[id] = { ...r.status };
-    return { sources: this.sources, error: this.error, inputs: per };
+    return { sources: this.sources, error: this.error, inputs: per, paused: this.paused };
   }
   async destroy() {
     clearInterval(this.findTimer);
     for (const r of this.receivers.values()) await r.stop();
     this.receivers.clear();
+    this.writeGuard();
     try { if (this.finder) this.lib().api.findDestroy(this.finder); } catch { /* ignore */ }
   }
 }

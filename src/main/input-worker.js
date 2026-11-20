@@ -57,7 +57,11 @@ function downscale(rgba, fw, fh) {
 
 while (Atomics.load(ctrl, 0) === 0) {
   const video = {}, audio = {};
-  const t = api.recvCapture(recv, video, audio, null, 100);
+  let t;
+  try { t = api.recvCapture(recv, video, audio, null, 100); } catch (e) {
+    parentPort.postMessage({ type: 'error', message: 'NDI receive failed: ' + e.message });
+    break;
+  }
   if (t === ndi.FRAME_VIDEO) {
     frames++; w = video.xres; h = video.yres;
     const wantFull = Atomics.load(ctrl, 1) === 1;

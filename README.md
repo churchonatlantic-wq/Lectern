@@ -6,10 +6,10 @@ Worship presentation software for Windows and macOS with **six independent outpu
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 (64-bit) | `Lectern-Setup-1.1.0.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
-| Windows (portable) | `Lectern-1.1.0-win.zip` | Unzip anywhere and run `Lectern.exe`. |
-| Mac (Apple Silicon and Intel) | `Lectern-1.1.0-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
-| Mac (zip) | `Lectern-1.1.0-universal-mac.zip` | Same app as the DMG, zipped. |
+| Windows 10/11 (64-bit) | `Lectern-Setup-1.1.1.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
+| Windows (portable) | `Lectern-1.1.1-win.zip` | Unzip anywhere and run `Lectern.exe`. |
+| Mac (Apple Silicon and Intel) | `Lectern-1.1.1-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
+| Mac (zip) | `Lectern-1.1.1-universal-mac.zip` | Same app as the DMG, zipped. |
 
 **NDI:** install the free [NDI Tools](https://ndi.video/tools/) (or the NDI 6 Runtime) on the presentation computer. Lectern finds the NDI library automatically. If it is somewhere unusual, set its location under Settings → NDI. Without NDI, screen outputs and previews still work, and a banner explains what's missing.
 
@@ -43,10 +43,11 @@ When macOS asks to let Lectern find devices on your local network, click **Allow
 - Drag the bottom edge of the service order, Inputs or Claude panel to change its height.
 - The layout is remembered. **View → Reset Panel Layout** puts it back.
 
-### Text boxes and presets
+### Text boxes, shapes and presets
 
-- Select an item and click **Text boxes** above the slides.
+- Select an item and click **Text boxes & shapes** above the slides.
 - Drag a box to move it and drag a corner to resize it. For each box, set the text size (in % of screen height), font, colour, alignment, bold, italic and uppercase. **+ Fixed text box** adds a box with your own text.
+- Give any text box a background shape (rectangle, rounded rectangle or ellipse) with its own fill colour, opacity and border. **+ Shape** adds a shape on its own, for example a band behind the lyrics. **Bring forward** and **Send back** change which box is in front.
 - **Use for this item** or **Use for every item in the service** applies the layout. Type a name and click **Save** to keep it as a text preset, then pick it under **Start from** later.
 - The layout is used on the Main, Lyrics key and Lobby looks. **Built-in look for this item** returns an item to the standard layout.
 
@@ -61,6 +62,8 @@ When macOS asks to let Lectern find devices on your local network, click **Allow
 - In the **Inputs** panel, click **+ NDI input** and pick a source found on the network.
 - **Background** uses the input behind the selected item's slides. **Full screen** adds it to the service and puts it on screen. You can also drag an input onto a slide, or choose it in the Background menu.
 - **Audio** turns the input's sound on or off, and the slider sets its volume. Input audio works whether or not the input is on screen, and plays through the device chosen in Settings → Audio.
+
+If Lectern closes unexpectedly while NDI inputs are running, it starts the next time with inputs paused, and the Inputs panel offers **Resume inputs**.
 
 ### Audio devices and Dante
 
@@ -99,6 +102,10 @@ Both ways use the same Lectern controls. Lectern shows you each change and asks 
 
 NDI sources appear on the network as `LECTERN 1 (Main)`, `LECTERN 2 (Lower Third)` and so on. You can change the prefix in Settings.
 
+### If something goes wrong
+
+Lectern writes a log to `lectern.log` in its data folder (**Help → Open Log Folder**): on Windows `%APPDATA%\Lectern\logs`, on a Mac `~/Library/Application Support/Lectern/logs`. Crash reports stay on this computer (**Help → Open Crash Reports Folder**). Nothing is uploaded.
+
 ## How it works
 
 - Electron app. The main process owns the state (`src/main/main.js`), and every window renders from it.
@@ -121,7 +128,7 @@ npm start
 
 - Windows installer, on Windows: `npm run dist:win`.
 - Universal, signed DMG, on a Mac: `npm run dist:mac`. Set `CSC_LINK`/`CSC_KEY_PASSWORD` to sign, and `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` to notarize.
-- Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.1.0.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
+- Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.1.1.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
 - CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`.
 
 ### NDI loopback test

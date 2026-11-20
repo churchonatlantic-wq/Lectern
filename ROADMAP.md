@@ -1,8 +1,6 @@
 # Lectern roadmap
 
-Planned changes after 1.0.0. Nothing here is built yet.
-
-Plan for building: one item at a time on a branch, each checked in a test build, with installers to try before it goes on `main`.
+Changes after 1.0.0. Items 1 to 8 are built in version 1.1.0. NDI input receiving still needs testing on a computer with NDI installed and a real source.
 
 ## 1. Resizable and minimizable panels
 
@@ -62,7 +60,7 @@ Control changes such as font size, importing files and backgrounds by asking Cla
   - Changes are shown before they happen.
   - Lectern asks before anything affects the live output during a service.
   - Everything can be undone.
-- **Open question:** whether the chat panel should also appear on the phone remote.
+- **Not built yet:** the chat panel on the phone remote (still an open question).
 
 ## 8. PowerPoint import
 

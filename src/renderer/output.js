@@ -11,5 +11,6 @@ function apply(payload) {
   surface.update(payload.rs, cfg);
 }
 
+if (window.lecternInput) window.LecternInputHub.attach(window.lecternInput);
 window.lecternOutput.init().then(apply);
 window.lecternOutput.onRender(apply);

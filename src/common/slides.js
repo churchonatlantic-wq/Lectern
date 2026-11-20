@@ -113,6 +113,11 @@
         return [{ kind: 'countdown', group: 'Countdown', color: '#7a8597', title: item.label || 'Service begins in', target: item.target || '10:30' }];
       case 'media':
         return [{ kind: 'media', group: 'Media', color: '#8a6bd1', media: item.media }];
+      case 'deck':
+        // Pictures imported from a PowerPoint file, one image per slide.
+        return (item.slides || []).map((m, i) => ({ kind: 'media', group: 'Slide ' + (i + 1), color: '#c2563a', media: m }));
+      case 'input':
+        return [{ kind: 'input', group: 'Input', color: '#1f9bd1', input: item.input }];
       case 'blank':
         return [{ kind: 'blank', group: 'Blank', color: '#3a3f47' }];
       default: return [];
@@ -129,6 +134,7 @@
       case 'announce': return [slide.title, slide.body].filter(Boolean).join('\n');
       case 'countdown': return slide.title;
       case 'media': return '[' + (slide.media || 'media') + ']';
+      case 'input': return '[NDI input]';
       default: return '';
     }
   }
@@ -141,7 +147,45 @@
       return song ? song.title : 'Missing song';
     }
     if (item.type === 'scripture') return item.ref || 'Scripture';
-    return { announce: 'Announcements', countdown: 'Countdown', media: item.media || 'Media', blank: 'Blank' }[item.type] || 'Item';
+    return { announce: 'Announcements', countdown: 'Countdown', media: item.media || 'Media', blank: 'Blank', deck: 'PowerPoint', input: 'NDI input' }[item.type] || 'Item';
+  }
+
+  // Background for one slide: the last background dropped on this slide or an earlier one,
+  // then the item's own background, then the service default.
+  function slideBackground(item, index, settings) {
+    let bg = (settings && settings.defaultBackground) || null;
+    if (!item) return bg;
+    if (item.background) bg = item.background;
+    const changes = item.bgChanges || {};
+    let best = -1;
+    for (const k of Object.keys(changes)) {
+      const n = Number(k);
+      if (n <= index && n > best && changes[k]) { best = n; bg = changes[k]; }
+    }
+    return bg;
+  }
+
+  // Text layout for an item: its own layout, else the service layout. A layout is either a
+  // preset id (string) or an inline { boxes } object. null means the built-in look.
+  function resolveLayout(ref, settings) {
+    if (!ref) return null;
+    if (typeof ref === 'object') return ref.boxes ? ref : null;
+    const p = ((settings && settings.textPresets) || []).find((x) => x.id === ref);
+    return p || null;
+  }
+  function itemLayout(item, service, settings) {
+    return resolveLayout((item && item.textLayout) || (service && service.textLayout), settings);
+  }
+
+  // Starting point for the text box editor: matches the built-in look.
+  function defaultLayout() {
+    return {
+      boxes: [
+        { id: 'main', role: 'text', x: 7, y: 7, w: 86, h: 72, size: 6.2, align: 'center', valign: 'center', bold: true },
+        { id: 'second', role: 'secondary', x: 7, y: 79, w: 86, h: 9, size: 3.6, align: 'center', valign: 'center', bold: false },
+        { id: 'foot', role: 'footer', x: 5, y: 92, w: 90, h: 6, size: 2.2, align: 'center', valign: 'center', bold: false, opacity: 0.65 },
+      ],
+    };
   }
 
   // Everything an output window needs, derived from the full app state.
@@ -162,9 +206,8 @@
       }
     }
 
-    let background = state.settings.defaultBackground || null;
-    if (item && item.background) background = item.background;
-    const foreground = slide && slide.kind === 'media' ? slide.media : null;
+    const background = slideBackground(item, state.live.slide, state.settings);
+    const foreground = slide && slide.kind === 'media' ? slide.media : slide && slide.kind === 'input' ? 'input:' + slide.input : null;
 
     const lobby = [];
     items.forEach((it) => { if (it.type === 'announce' && it.lobby !== false) lobby.push(...announceSlides(it)); });
@@ -188,8 +231,10 @@
       lobby,
       lobbyInterval: state.settings.lobbyInterval || 8,
       transitionMs: state.settings.transitionMs,
+      textLayout: itemLayout(item, state.service, state.settings),
+      mediaOptions: state.service.mediaOptions || {},
     };
   }
 
-  return { parseLyrics, parseArrangement, songSlides, scriptureSlides, announceSlides, itemSlides, itemTitle, plainText, stripTags, groupColor, buildRenderState };
+  return { parseLyrics, parseArrangement, songSlides, scriptureSlides, announceSlides, itemSlides, itemTitle, plainText, stripTags, groupColor, buildRenderState, slideBackground, resolveLayout, itemLayout, defaultLayout };
 });

@@ -1,7 +1,7 @@
 {
   "name": "lectern",
   "productName": "Lectern",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Worship presentation software with six NDI outputs",
   "main": "src/main/main.js",
   "author": "Lectern",
@@ -14,7 +14,9 @@
     "test:ndi": "node test/ndi-loopback.js"
   },
   "dependencies": {
-    "koffi": "^2.9.0"
+    "@anthropic-ai/sdk": "1.5.0",
+    "koffi": "^2.9.0",
+    "pdfjs-dist": "4.10.38"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.6",
@@ -35,7 +37,10 @@
       "assets/**/*",
       "package.json",
       "!test/**",
-      "!build/**"
+      "!build/**",
+      "!node_modules/@napi-rs/**",
+      "!node_modules/pdfjs-dist/{legacy,types,web,image_decoders}/**",
+      "!node_modules/**/*.map"
     ],
     "fileAssociations": [
       {

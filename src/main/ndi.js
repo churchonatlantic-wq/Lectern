@@ -81,6 +81,26 @@ function load(customPath) {
     timestamp: 'int64_t',
   });
   const Tally = koffi.struct('NDIlib_tally_t', { on_program: 'bool', on_preview: 'bool' });
+  // Receiving (NDI inputs)
+  const Source = koffi.struct('NDIlib_source_t', { p_ndi_name: 'const char *', p_url_address: 'const char *' });
+  const FindCreate = koffi.struct('NDIlib_find_create_t', { show_local_sources: 'bool', p_groups: 'const char *', p_extra_ips: 'const char *' });
+  const RecvCreate = koffi.struct('NDIlib_recv_create_v3_t', {
+    source_to_connect_to: 'NDIlib_source_t',
+    color_format: 'int',
+    bandwidth: 'int',
+    allow_video_fields: 'bool',
+    p_ndi_recv_name: 'const char *',
+  });
+  const AudioFrame = koffi.struct('NDIlib_audio_frame_v2_t', {
+    sample_rate: 'int',
+    no_channels: 'int',
+    no_samples: 'int',
+    timecode: 'int64_t',
+    p_data: 'void *',
+    channel_stride_in_bytes: 'int',
+    p_metadata: 'const char *',
+    timestamp: 'int64_t',
+  });
 
   const api = {
     initialize: lib.func('bool NDIlib_initialize(void)'),
@@ -90,14 +110,45 @@ function load(customPath) {
     sendVideo: lib.func('void NDIlib_send_send_video_v2(void *p_instance, const NDIlib_video_frame_v2_t *p_video_data)'),
     connections: lib.func('int NDIlib_send_get_no_connections(void *p_instance, uint32_t timeout_in_ms)'),
     tally: lib.func('bool NDIlib_send_get_tally(void *p_instance, _Out_ NDIlib_tally_t *p_tally, uint32_t timeout_in_ms)'),
+    findCreate: lib.func('void *NDIlib_find_create_v2(const NDIlib_find_create_t *p_create_settings)'),
+    findDestroy: lib.func('void NDIlib_find_destroy(void *p_instance)'),
+    findSources: lib.func('void *NDIlib_find_get_current_sources(void *p_instance, _Out_ uint32_t *p_no_sources)'),
+    recvCreate: lib.func('void *NDIlib_recv_create_v3(const NDIlib_recv_create_v3_t *p_create_settings)'),
+    recvDestroy: lib.func('void NDIlib_recv_destroy(void *p_instance)'),
+    recvCapture: lib.func('int NDIlib_recv_capture_v2(void *p_instance, _Out_ NDIlib_video_frame_v2_t *p_video_data, _Out_ NDIlib_audio_frame_v2_t *p_audio_data, void *p_metadata, uint32_t timeout_in_ms)'),
+    freeVideo: lib.func('void NDIlib_recv_free_video_v2(void *p_instance, const NDIlib_video_frame_v2_t *p_video_data)'),
+    freeAudio: lib.func('void NDIlib_recv_free_audio_v2(void *p_instance, const NDIlib_audio_frame_v2_t *p_audio_data)'),
   };
   if (!api.initialize()) {
     const err = new Error('NDI runtime loaded but failed to initialize (unsupported CPU?).');
     err.code = 'NDI_INIT_FAILED';
     throw err;
   }
-  cached = { api, libPath, version: api.version(), types: { SendCreate, VideoFrame, Tally } };
+  cached = { api, libPath, version: api.version(), types: { SendCreate, VideoFrame, Tally, Source, FindCreate, RecvCreate, AudioFrame } };
   return cached;
 }
 
-module.exports = { load, FOURCC_BGRA, FOURCC_BGRX, TIMECODE_SYNTHESIZE, candidatePaths };
+// Names of the NDI sources currently visible on the network.
+function listSources(lib, finder) {
+  const count = [0];
+  const ptr = lib.api.findSources(finder, count);
+  if (!ptr || !count[0]) return [];
+  return koffi.decode(ptr, koffi.array(lib.types.Source, count[0])).map((x) => x.p_ndi_name).filter(Boolean);
+}
+
+// Copies `len` bytes out of NDI-owned memory.
+const byteArrays = new Map();
+function copyBytes(ptr, len) {
+  let t = byteArrays.get(len);
+  if (!t) { t = koffi.array('uint8_t', len, 'Typed'); if (byteArrays.size > 16) byteArrays.clear(); byteArrays.set(len, t); }
+  return koffi.decode(ptr, t);
+}
+
+const RECV_COLOR_RGBX_RGBA = 2;
+const RECV_BANDWIDTH_HIGHEST = 100;
+const FRAME_NONE = 0, FRAME_VIDEO = 1, FRAME_AUDIO = 2, FRAME_ERROR = 4;
+
+module.exports = {
+  load, FOURCC_BGRA, FOURCC_BGRX, TIMECODE_SYNTHESIZE, candidatePaths, listSources, copyBytes,
+  RECV_COLOR_RGBX_RGBA, RECV_BANDWIDTH_HIGHEST, FRAME_NONE, FRAME_VIDEO, FRAME_AUDIO, FRAME_ERROR,
+};

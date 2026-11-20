@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, screen, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, screen, Menu, shell, session, safeStorage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -8,6 +8,10 @@ const { Store, uid, LOOK_DEFAULTS } = require('./store');
 const { OutputManager } = require('./outputs');
 const { RemoteServer } = require('./remote');
 const ndi = require('./ndi');
+const { InputManager } = require('./inputs');
+const { Bridge } = require('./bridge');
+const { Chat } = require('./chat');
+const pptx = require('./pptx');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'lectern', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
@@ -20,14 +24,14 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 if (process.env.LECTERN_USER_DATA) app.setPath('userData', process.env.LECTERN_USER_DATA);
 
-let store, outputs, remote, control;
+let store, outputs, remote, control, inputs, audioWin, bridge, chat;
 const runtime = {
   live: { itemId: null, slide: 0 },
   layers: { slide: true, media: true, props: true, msg: false, stage: false },
   message: 'Overflow parking is open on Elm Street.',
   stageMessage: 'Wrap up · 2 minutes',
   timer: { durationMs: 35 * 60000, running: false, startedAt: 0, accumulatedMs: 0 },
-  status: { outputs: [], ndi: null, displays: [], remote: null },
+  status: { outputs: [], ndi: null, displays: [], remote: null, inputs: { sources: [], error: null, inputs: {} } },
   usageLogged: new Set(),
   dirty: false,
 };
@@ -38,6 +42,7 @@ function fullState() {
     library: d.library, service: d.service, servicePath: d.servicePath, settings: d.settings, outputs: d.outputs, usageCount: d.usage.length,
     live: runtime.live, layers: runtime.layers, message: runtime.message, stageMessage: runtime.stageMessage, timer: runtime.timer,
     status: runtime.status, media: store.listMedia(), dirty: runtime.dirty, platform: process.platform,
+    claude: { hasKey: !!d.settings.claudeKey, mcpEnabled: d.settings.mcpEnabled !== false, canUndo: bridge ? bridge.canUndo() : null },
   };
 }
 
@@ -51,7 +56,30 @@ function broadcast() {
     if (control && !control.isDestroyed()) control.webContents.send('state', st);
     const rs = Slides.buildRenderState(st);
     outputs.broadcast('render', { rs, outputs: st.outputs });
+    sendAudioConfig();
   });
+}
+
+// ---------- audio window (NDI input audio) ----------
+function audioConfig() {
+  const s = store.data.settings;
+  return { device: s.audioDevice || '', inputs: (s.inputs || []).map((x) => ({ id: x.id, audio: !!x.audio, volume: x.volume == null ? 1 : x.volume })) };
+}
+let lastAudioCfg = '';
+function sendAudioConfig() {
+  const cfg = audioConfig();
+  const key = JSON.stringify(cfg);
+  if (key === lastAudioCfg || !audioWin || audioWin.isDestroyed()) return;
+  lastAudioCfg = key;
+  audioWin.webContents.send('audio/config', cfg);
+}
+function createAudioWindow() {
+  audioWin = new BrowserWindow({
+    show: false, width: 200, height: 100, skipTaskbar: true,
+    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'audio-preload.js'), contextIsolation: true, backgroundThrottling: false },
+  });
+  audioWin.loadFile(path.join(__dirname, '..', 'renderer', 'audio.html'));
+  audioWin.webContents.on('render-process-gone', () => { lastAudioCfg = ''; setTimeout(() => { if (audioWin && !audioWin.isDestroyed()) audioWin.reload(); }, 1000); });
 }
 
 function changed({ persist = false, dirty = false } = {}) {
@@ -146,14 +174,20 @@ async function openService(file) {
 }
 
 // ---------- media ----------
-async function importMedia() {
-  const r = await dialog.showOpenDialog(control, {
-    title: 'Import media', properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Images and video', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'mp4', 'mov', 'm4v', 'webm', 'mkv'] }],
-  });
-  if (r.canceled) return [];
+const MEDIA_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'mp4', 'mov', 'm4v', 'webm', 'mkv'];
+async function importMedia(paths) {
+  if (!paths) {
+    const r = await dialog.showOpenDialog(control, {
+      title: 'Import media', properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Images and video', extensions: MEDIA_EXT }],
+    });
+    if (r.canceled) return [];
+    paths = r.filePaths;
+  }
   const added = [];
-  for (const f of r.filePaths) {
+  for (const f of paths) {
+    if (!fs.existsSync(f) || !fs.statSync(f).isFile()) throw new Error('File not found: ' + f);
+    if (!MEDIA_EXT.includes(path.extname(f).slice(1).toLowerCase())) throw new Error('Not an image or video Lectern can use: ' + path.basename(f));
     let name = path.basename(f).replace(/[^\w.\- ]+/g, '_');
     const ext = path.extname(name), base = name.slice(0, -ext.length);
     let n = 1;
@@ -166,13 +200,16 @@ async function importMedia() {
 }
 
 // ---------- songs ----------
-async function importSongs() {
-  const r = await dialog.showOpenDialog(control, {
-    title: 'Import songs (plain text)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Text', extensions: ['txt'] }],
-  });
-  if (r.canceled) return 0;
+async function importSongs(paths) {
+  if (!paths) {
+    const r = await dialog.showOpenDialog(control, {
+      title: 'Import songs (plain text)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Text', extensions: ['txt'] }],
+    });
+    if (r.canceled) return 0;
+    paths = r.filePaths;
+  }
   let count = 0;
-  for (const f of r.filePaths) {
+  for (const f of paths) {
     const text = fs.readFileSync(f, 'utf8').replace(/^﻿/, '');
     // SongSelect-style text: title on line 1, sections as "Verse 1" lines, CCLI line at the end.
     const lines = text.replace(/\r/g, '').split('\n');
@@ -209,6 +246,99 @@ async function exportUsage() {
   const rows = [['Date', 'Title', 'Author', 'CCLI Song #'].map(q).join(',')].concat(store.data.usage.map((u) => [u.date.slice(0, 10), u.title, u.author, u.ccli].map(q).join(',')));
   fs.writeFileSync(r.filePath, rows.join('\r\n'));
   return true;
+}
+
+// ---------- PowerPoint ----------
+async function pickPowerPoint() {
+  const r = await dialog.showOpenDialog(control, { title: 'Import PowerPoint', properties: ['openFile'], filters: [{ name: 'PowerPoint', extensions: ['pptx', 'ppt'] }] });
+  return r.canceled ? null : r.filePaths[0];
+}
+
+// Renders each page of a PDF to PNG files in a hidden window (pdf.js).
+const pdfJobs = new Map();
+function renderPdf(pdfFile, outDir) {
+  return new Promise((resolve, reject) => {
+    const win = new BrowserWindow({
+      show: false, width: 800, height: 600,
+      webPreferences: { preload: path.join(__dirname, '..', 'preload', 'pdf-preload.js'), contextIsolation: true, backgroundThrottling: false },
+    });
+    const files = [];
+    const finish = (err) => {
+      pdfJobs.delete(win.webContents.id);
+      clearTimeout(timer);
+      if (!win.isDestroyed()) win.destroy();
+      if (err) reject(err); else resolve(files.sort());
+    };
+    const timer = setTimeout(() => finish(new Error('Turning the slides into pictures took too long.')), 5 * 60000);
+    pdfJobs.set(win.webContents.id, { pdfFile, outDir, files, finish });
+    win.loadFile(path.join(__dirname, '..', 'renderer', 'pdfrender.html'));
+  });
+}
+
+async function importPowerPoint(file, mode, after) {
+  if (!file || !fs.existsSync(file)) throw new Error('PowerPoint file not found: ' + file);
+  const tmp = pptx.tempDir();
+  const base = path.basename(file).replace(/\.[^.]+$/, '');
+  try {
+    let item;
+    if (mode === 'pictures') {
+      let pngs = await pptx.exportWithPowerPoint(file, tmp);
+      if (!pngs) {
+        const pdf = await pptx.convertWithLibreOffice(file, tmp, 'pdf').catch((e) => { throw new Error('LibreOffice could not convert the file. ' + (e.stderr || e.message || '')); });
+        if (!pdf) throw new Error('Importing slides as pictures needs PowerPoint (Windows) or the free LibreOffice. Install LibreOffice from libreoffice.org, then try again.');
+        pngs = await renderPdf(pdf, tmp);
+      }
+      if (!pngs.length) throw new Error('No slides were found in that file.');
+      const slides = [];
+      const safe = base.replace(/[^\w.\- ]+/g, '_').slice(0, 60) || 'Slides';
+      pngs.forEach((src, i) => {
+        let name = safe + ' - Slide ' + String(i + 1).padStart(2, '0') + '.png';
+        let n = 1;
+        while (fs.existsSync(path.join(store.mediaDir, name))) name = safe + ' (' + ++n + ') - Slide ' + String(i + 1).padStart(2, '0') + '.png';
+        fs.copyFileSync(src, path.join(store.mediaDir, name));
+        slides.push(name);
+      });
+      item = { type: 'deck', title: base, slides };
+    } else {
+      const src = await pptx.ensurePptx(file, tmp);
+      const slides = pptx.extractText(src);
+      if (!slides.length) throw new Error('No text was found in that file. Try importing it as pictures.');
+      item = { type: 'announce', title: base, text: pptx.toAnnounceText(slides), lobby: false };
+    }
+    const id = await dispatch('item/add', { item, after });
+    return { id, slides: item.type === 'deck' ? item.slides.length : Slides.itemSlides(item).length, mode };
+  } finally {
+    fs.rm(tmp, { recursive: true, force: true }, () => {});
+  }
+}
+
+// ---------- Claude ----------
+function getClaudeKey() {
+  const enc = store.data.settings.claudeKey;
+  if (!enc) return '';
+  try { return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(enc, 'base64')) : ''; } catch { return ''; }
+}
+function bridgeConfigFile() { return path.join(app.getPath('userData'), 'bridge.json'); }
+// What to paste into the Claude desktop app's settings (claude_desktop_config.json).
+function mcpConfig() {
+  const script = path.join(app.getAppPath(), 'src', 'mcp', 'lectern-mcp.js');
+  return { mcpServers: { lectern: { command: process.execPath, args: [script, '--config', bridgeConfigFile()], env: { ELECTRON_RUN_AS_NODE: '1' } } } };
+}
+function startBridge() {
+  const s = store.data.settings;
+  if (!s.bridgeToken) { s.bridgeToken = require('crypto').randomBytes(24).toString('hex'); store.save(); }
+  if (s.mcpEnabled === false) bridge.stop(); else bridge.start(bridgeConfigFile(), s.bridgeToken);
+}
+async function confirmClaude(text, { live, source }) {
+  const r = await dialog.showMessageBox(control, {
+    type: live ? 'warning' : 'question',
+    title: 'Claude',
+    message: (live ? 'Claude wants to change what is on screen:' : 'Claude wants to make this change:'),
+    detail: text + '\n\nRequested from the ' + source + '. You can undo it from Edit > Undo Claude Change.',
+    buttons: ['Allow', 'Don’t allow'], defaultId: live ? 1 : 0, cancelId: 1, noLink: true,
+    ...(live ? {} : { checkboxLabel: 'Don’t ask again for changes that are not on screen (until Lectern restarts)' }),
+  });
+  return { ok: r.response === 0, skipChanges: !!r.checkboxChecked };
 }
 
 // ---------- action dispatcher ----------
@@ -259,7 +389,7 @@ async function dispatch(type, p = {}) {
     case 'song/delete':
       if (d.service.items.some((x) => x.type === 'song' && x.songId === p.id)) throw new Error('This song is in the current service. Remove it from the service first.');
       d.library.songs = d.library.songs.filter((x) => x.id !== p.id); changed({ persist: true }); return true;
-    case 'song/import': return importSongs();
+    case 'song/import': return importSongs(p.paths);
 
     case 'bible/lookup': return bible.lookup(p.ref);
     case 'bible/books': return bible.bookNames();
@@ -301,10 +431,11 @@ async function dispatch(type, p = {}) {
       changed({ persist: true });
       if ('ndiRuntimePath' in p.patch || 'ndiPrefix' in p.patch) await outputs.restartAllNdi();
       if ('remotePort' in p.patch || 'remotePin' in p.patch || 'remoteEnabled' in p.patch) startRemote();
+      if ('ndiRuntimePath' in p.patch) await inputs.sync();
       return true;
     }
 
-    case 'media/import': return importMedia();
+    case 'media/import': return importMedia(p.paths);
     case 'media/remove': {
       const f = path.join(store.mediaDir, path.basename(p.name));
       if (fs.existsSync(f)) fs.unlinkSync(f);
@@ -312,6 +443,112 @@ async function dispatch(type, p = {}) {
     }
     case 'media/reveal': shell.showItemInFolder(path.join(store.mediaDir, path.basename(p.name || ''))); return true;
 
+    case 'media/options': {
+      const name = path.basename(String(p.name || ''));
+      d.service.mediaOptions = d.service.mediaOptions || {};
+      const speed = Math.max(0.5, Math.min(2, Number(p.speed) || 1));
+      if (speed === 1 && p.audioFollow !== false) delete d.service.mediaOptions[name];
+      else d.service.mediaOptions[name] = { speed, audioFollow: p.audioFollow !== false };
+      changed({ persist: true, dirty: true }); return true;
+    }
+
+    // Background dropped on a slide: used from that slide onward (null removes it).
+    case 'item/bgChange': {
+      const it = findItem(p.id);
+      if (!it) return false;
+      const changes = { ...(it.bgChanges || {}) };
+      if (p.media) changes[String(p.slide | 0)] = p.media; else delete changes[String(p.slide | 0)];
+      it.bgChanges = Object.keys(changes).length ? changes : undefined;
+      changed({ persist: true, dirty: true }); return true;
+    }
+
+    // Text layouts: a preset id, an inline { boxes } layout, or null for the built-in look.
+    case 'layout/apply': {
+      const layout = p.layout && typeof p.layout === 'object' ? { boxes: p.layout.boxes } : p.layout || null;
+      if (p.scope === 'all') {
+        d.service.textLayout = layout;
+        d.service.items.forEach((it) => { delete it.textLayout; });
+      } else if (p.scope === 'service') d.service.textLayout = layout;
+      else { const it = findItem(p.itemId); if (it) { if (layout) it.textLayout = layout; else delete it.textLayout; } }
+      changed({ persist: true, dirty: true }); return true;
+    }
+    case 'preset/save': {
+      const list = d.settings.textPresets = d.settings.textPresets || [];
+      const name = String(p.name || '').trim().slice(0, 60);
+      if (!name) throw new Error('A text preset needs a name.');
+      let preset = list.find((x) => x.id === p.id) || list.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (!preset) { preset = { id: uid() }; list.push(preset); }
+      Object.assign(preset, { name, boxes: (p.layout && p.layout.boxes) || [] });
+      changed({ persist: true }); return preset.id;
+    }
+    case 'preset/delete': {
+      d.settings.textPresets = (d.settings.textPresets || []).filter((x) => x.id !== p.id);
+      if (d.service.textLayout === p.id) d.service.textLayout = null;
+      d.service.items.forEach((it) => { if (it.textLayout === p.id) delete it.textLayout; });
+      changed({ persist: true }); return true;
+    }
+
+    // NDI inputs
+    case 'input/add': {
+      const list = d.settings.inputs = d.settings.inputs || [];
+      if (!p.source) throw new Error('Choose an NDI source.');
+      const inp = { id: uid(), source: String(p.source), name: String(p.name || p.source).replace(/^.*\(([^)]+)\)\s*$/, '$1').slice(0, 40), audio: false, volume: 1 };
+      list.push(inp);
+      changed({ persist: true });
+      await inputs.sync();
+      return inp.id;
+    }
+    case 'input/update': {
+      const inp = (d.settings.inputs || []).find((x) => x.id === p.id);
+      if (!inp) return false;
+      const patch = { ...p.patch };
+      if (patch.volume != null) patch.volume = Math.max(0, Math.min(2, Number(patch.volume)));
+      if (patch.name != null) patch.name = String(patch.name).slice(0, 40) || inp.name;
+      Object.assign(inp, patch);
+      changed({ persist: true });
+      await inputs.sync();
+      return true;
+    }
+    case 'input/remove':
+      d.settings.inputs = (d.settings.inputs || []).filter((x) => x.id !== p.id);
+      changed({ persist: true });
+      await inputs.sync();
+      return true;
+    case 'input/discover': inputs.startDiscovery(); return true;
+
+    // PowerPoint
+    case 'pptx/pick': return pickPowerPoint();
+    case 'pptx/import': return importPowerPoint(p.path, p.mode, p.after);
+
+    // Claude
+    case 'claude/setKey': {
+      const key = String(p.key || '').trim();
+      if (key && !safeStorage.isEncryptionAvailable()) throw new Error('This computer cannot store the key securely, so it was not saved.');
+      d.settings.claudeKey = key ? safeStorage.encryptString(key).toString('base64') : '';
+      changed({ persist: true }); return true;
+    }
+    case 'claude/mcp': {
+      d.settings.mcpEnabled = !!p.enabled;
+      startBridge();
+      changed({ persist: true }); return true;
+    }
+    case 'claude/copyConfig': clipboard.writeText(JSON.stringify(mcpConfig(), null, 2)); return mcpConfig();
+    case 'claude/undo': { const label = await bridge.undo(); changed(); return label; }
+    case 'chat/send': {
+      const send = (ev) => { if (control && !control.isDestroyed()) control.webContents.send('event', ev); };
+      const r = await chat.send(String(p.text || '').slice(0, 4000), (step) => send({ type: 'chat/step', text: step }));
+      changed();
+      return r;
+    }
+    case 'chat/reset': chat.reset(); return true;
+
+    case 'test/capture': {
+      // Test hook (only with LECTERN_CAPTURE): saves a screenshot of the control window.
+      if (!process.env.LECTERN_CAPTURE) throw new Error('Unknown action ' + type);
+      const img = await control.webContents.capturePage();
+      fs.writeFileSync(path.join(process.env.LECTERN_CAPTURE, 'shot-' + String(p.name).replace(/[^\w-]/g, '') + '.png'), img.toPNG());
+      return true;
+    }
     case 'usage/export': return exportUsage();
     case 'usage/clear': d.usage = []; changed({ persist: true }); return true;
     case 'app/openExternal': if (/^https:\/\//.test(p.url)) shell.openExternal(p.url); return true;
@@ -356,12 +593,20 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Import Media…', accelerator: 'CmdOrCtrl+I', click: send('media/import') },
         { label: 'Import Songs (text)…', click: send('song/import') },
+        { label: 'Import PowerPoint…', click: () => control && control.webContents.send('event', { type: 'pptx/import' }) },
         { label: 'Export CCLI Usage…', click: send('usage/export') },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
     },
-    { role: 'editMenu' },
+    {
+      label: 'Edit', submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Undo Claude Change', click: () => dispatch('claude/undo').then((label) => control && control.webContents.send('event', { type: 'toast', text: 'Undone: ' + label })).catch((e) => dialog.showErrorBox('Lectern', e.message)) },
+      ],
+    },
     {
       label: 'Live', submenu: [
         { label: 'Next Slide', accelerator: 'Right', registerAccelerator: false, click: send('live/next') },
@@ -374,7 +619,14 @@ function buildMenu() {
         { label: 'Clear Messages', accelerator: 'F6', registerAccelerator: false, click: send('layer/toggle', { layer: 'msg', value: false }) },
       ],
     },
-    { role: 'viewMenu' },
+    {
+      label: 'View', submenu: [
+        { label: 'Reset Panel Layout', click: () => control && control.webContents.send('event', { type: 'layout/reset' }) },
+        { type: 'separator' },
+        { role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' },
+      ],
+    },
     { role: 'windowMenu' },
     {
       role: 'help', submenu: [
@@ -421,6 +673,46 @@ app.whenReady().then(async () => {
   });
   remote = new RemoteServer({ getState: () => ({ state: fullState(), slides: Slides }), dispatch });
 
+  // Let the control window list audio devices by name and route audio to them.
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => ['media', 'speaker-selection', 'clipboard-sanitized-write'].includes(permission));
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(['media', 'speaker-selection', 'clipboard-sanitized-write'].includes(permission)));
+
+  const sendTo = (wcId, channel, payload) => {
+    const wc = require('electron').webContents.fromId(wcId);
+    if (wc && !wc.isDestroyed()) wc.send(channel, payload);
+  };
+  inputs = new InputManager({
+    getInputs: () => store.data.settings.inputs || [],
+    getSettings: () => store.data.settings,
+    onStatus: (s) => { runtime.status.inputs = s; broadcast(); },
+    sendFull: (wcId, frame) => sendTo(wcId, 'input/frame', frame),
+    sendPreview: (frame) => { if (control && !control.isDestroyed()) control.webContents.send('input/preview', frame); },
+    sendAudio: (m) => { if (audioWin && !audioWin.isDestroyed()) audioWin.webContents.send('input/audio', m); },
+  });
+  ipcMain.on('input/want', (e, ids) => inputs.setWant(e.sender.id, Array.isArray(ids) ? ids.map(String) : []));
+  ipcMain.on('input/preview-want', (_e, ids) => inputs.setPreview(Array.isArray(ids) ? ids.map(String) : []));
+  ipcMain.handle('audio/init', () => { lastAudioCfg = JSON.stringify(audioConfig()); return audioConfig(); });
+
+  ipcMain.handle('pdf/data', (e) => { const j = pdfJobs.get(e.sender.id); return j ? new Uint8Array(fs.readFileSync(j.pdfFile)) : null; });
+  ipcMain.handle('pdf/page', (e, n, png) => {
+    const j = pdfJobs.get(e.sender.id);
+    if (!j) return false;
+    const f = path.join(j.outDir, 'slide-' + String(n).padStart(3, '0') + '.png');
+    fs.writeFileSync(f, Buffer.from(png));
+    j.files.push(f);
+    return true;
+  });
+  ipcMain.on('pdf/done', (e) => { const j = pdfJobs.get(e.sender.id); if (j) j.finish(); });
+  ipcMain.on('pdf/fail', (e, msg) => { const j = pdfJobs.get(e.sender.id); if (j) j.finish(new Error('Could not read the slides: ' + msg)); });
+
+  bridge = new Bridge({
+    store, runtime, dispatch, slides: Slides, confirm: confirmClaude,
+    importers: { media: (paths) => importMedia(paths), songs: (paths) => importSongs(paths), powerpoint: (file, mode) => importPowerPoint(file, mode) },
+    onApplied: () => broadcast(),
+    onRestore: async () => { runtime.dirty = true; store.save(); await outputs.sync(); await inputs.sync(); broadcast(); },
+  });
+  chat = new Chat({ bridge, getKey: getClaudeKey });
+
   ipcMain.handle('action', async (_e, { type, payload }) => {
     try { return { ok: true, value: await dispatch(type, payload) }; } catch (e) { return { ok: false, error: e.message }; }
   });
@@ -431,12 +723,26 @@ app.whenReady().then(async () => {
 
   buildMenu();
   createControl();
+  createAudioWindow();
+  startBridge();
+  inputs.startDiscovery();
+  inputs.sync();
   refreshDisplays();
   screen.on('display-added', () => { refreshDisplays(); outputs.runners.forEach((r) => r.cfg && r.cfg.display && r.restartDisplay()); });
   screen.on('display-removed', () => { refreshDisplays(); outputs.runners.forEach((r) => r.cfg && r.cfg.display && r.restartDisplay()); });
   startRemote();
   await outputs.sync();
   broadcast();
+
+  // Test hook: LECTERN_TEST_SCRIPT=/file.js runs that script in the control window once it has loaded.
+  if (process.env.LECTERN_TEST_SCRIPT && process.env.LECTERN_CAPTURE) {
+    control.webContents.on('console-message', (_e, _level, message) => { if (/TEST|Uncaught|Error/.test(message)) process.stdout.write(message + '\n'); });
+    control.webContents.once('did-finish-load', () => setTimeout(() => {
+      control.webContents.executeJavaScript(fs.readFileSync(process.env.LECTERN_TEST_SCRIPT, 'utf8')).catch((e) => console.log('TEST ERROR', e.message));
+    }, 1500));
+  }
+  // Test hook: LECTERN_AUTOCONFIRM=1 approves Claude changes without a dialog (headless tests only).
+  if (process.env.LECTERN_AUTOCONFIRM && process.env.LECTERN_CAPTURE) bridge.ctx.confirm = async () => ({ ok: true });
 
   // Debug: LECTERN_CAPTURE=/dir writes PNGs of the control window and any screen outputs every 4 s.
   if (process.env.LECTERN_CAPTURE) {
@@ -463,6 +769,8 @@ app.on('before-quit', async (e) => {
   quitting = true;
   try { store && store.flush(); } catch { /* ignore */ }
   try { remote && remote.stop(); } catch { /* ignore */ }
+  try { bridge && bridge.stop(); } catch { /* ignore */ }
+  try { inputs && (await inputs.destroy()); } catch { /* ignore */ }
   try { outputs && (await outputs.destroy()); } catch { /* ignore */ }
   app.exit(0);
 });

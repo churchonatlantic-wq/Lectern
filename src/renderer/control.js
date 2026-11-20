@@ -6,8 +6,8 @@
   const esc = R.esc;
   const $ = (id) => document.getElementById(id);
 
-  const TYPE_LABEL = { song: 'Song', scripture: 'Scripture', announce: 'Text', countdown: 'Countdown', media: 'Media', blank: 'Blank' };
-  const TYPE_COLOR = { song: '#4f7cff', scripture: '#d6a02c', announce: '#2bb3a3', countdown: '#7a8597', media: '#8a6bd1', blank: '#3a3f47' };
+  const TYPE_LABEL = { song: 'Song', scripture: 'Scripture', announce: 'Text', countdown: 'Countdown', media: 'Media', blank: 'Blank', deck: 'PowerPoint', input: 'NDI input' };
+  const TYPE_COLOR = { song: '#4f7cff', scripture: '#d6a02c', announce: '#2bb3a3', countdown: '#7a8597', media: '#8a6bd1', blank: '#3a3f47', deck: '#c2563a', input: '#1f9bd1' };
   const LOOKS = {
     main: 'Main · text over background',
     lowerthird: 'Lower third · keyed band',
@@ -38,12 +38,19 @@
   const findItem = (id) => items().find((x) => x.id === id);
   const slidesOf = (it) => S.itemSlides(it, st.library);
   const titleOf = (it) => S.itemTitle(it, st.library);
+  const mediaLabel = (v) => {
+    if (!v) return '';
+    if (v.startsWith('preset:')) return v.slice(7);
+    if (v.startsWith('input:')) { const x = (st.settings.inputs || []).find((i) => 'input:' + i.id === v); return 'NDI: ' + (x ? x.name : 'input'); }
+    return v;
+  };
   const mediaOptions = (selected, { includeDefault = true, includeNone = false, images = false } = {}) => {
     let h = '';
     if (includeDefault) h += '<option value="">Service default</option>';
     if (includeNone) h += '<option value="">None</option>';
     if (!images) h += PRESETS.map(([v, l]) => '<option value="' + v + '"' + (v === selected ? ' selected' : '') + '>' + l + '</option>').join('');
     h += st.media.filter((m) => !images || !R.isVideo(m)).map((m) => '<option value="' + esc(m) + '"' + (m === selected ? ' selected' : '') + '>' + esc(m) + '</option>').join('');
+    if (!images) h += (st.settings.inputs || []).map((x) => '<option value="input:' + esc(x.id) + '"' + ('input:' + x.id === selected ? ' selected' : '') + '>NDI: ' + esc(x.name) + '</option>').join('');
     return h;
   };
 
@@ -174,7 +181,7 @@
 
     const slides = it ? slidesOf(it) : [];
     const song = it && it.type === 'song' ? st.library.songs.find((s) => s.id === it.songId) : null;
-    const key = JSON.stringify([it, song, st.settings.defaultBackground, st.settings.theme, st.media.length]);
+    const key = JSON.stringify([it, song, st.settings.defaultBackground, st.settings.theme, st.media.length, st.service.textLayout, st.settings.textPresets, st.settings.inputs]);
     if (key !== gridKey) {
       gridKey = key;
       thumbSurfaces.forEach((s) => s.destroy());
@@ -183,15 +190,19 @@
       if (!it) grid.innerHTML = '<div class="empty">Pick an item on the left to see its slides. Double-click an item to put its first slide on screen.</div>';
       else if (!slides.length) grid.innerHTML = '<div class="empty">This item has no slides yet. Click Edit to add some.</div>';
       else {
-        grid.innerHTML = slides.map((sl, i) => '<button class="slide" data-slide="' + i + '"><div class="frame"><div></div></div>' +
-          '<div class="cap" style="background:' + sl.color + '"><span class="n">' + (i + 1) + '</span>' + esc(sl.group) + '</div></button>').join('');
+        const changes = it.bgChanges || {};
+        grid.innerHTML = slides.map((sl, i) => '<div class="slide" role="button" tabindex="0" data-slide="' + i + '">' +
+          (changes[i] ? '<span class="bgmark" title="Background from this slide on"><span>▸ ' + esc(mediaLabel(changes[i])) + '</span><button data-unbg="' + i + '" title="Remove this background change" aria-label="Remove background change">✕</button></span>' : '') +
+          '<div class="frame"><div></div></div>' +
+          '<div class="cap" style="background:' + sl.color + '"><span class="n">' + (i + 1) + '</span>' + esc(sl.group) + '</div></div>').join('');
         const base = S.buildRenderState(st);
+        const layout = S.itemLayout(it, st.service, st.settings);
         grid.querySelectorAll('.slide').forEach((btn, i) => {
           const surf = new R.Surface(btn.querySelector('.frame > div'), { preview: true, transitions: false });
           const sl = slides[i];
           surf.update({
-            ...base, slide: sl, slideKey: 't' + i, foreground: sl.kind === 'media' ? sl.media : null,
-            background: it.background || st.settings.defaultBackground, layers: { slide: true, media: true, props: false, msg: false, stage: false },
+            ...base, slide: sl, slideKey: 't' + i, foreground: sl.kind === 'media' ? sl.media : sl.kind === 'input' ? 'input:' + sl.input : null, textLayout: layout,
+            background: S.slideBackground(it, i, st.settings), layers: { slide: true, media: true, props: false, msg: false, stage: false },
           }, { look: 'main', fontScale: 1, showProps: false, showMessages: false });
           thumbSurfaces.push(surf);
         });
@@ -204,8 +215,35 @@
     });
   }
   $('grid').addEventListener('click', (e) => {
+    const un = e.target.closest('[data-unbg]');
+    if (un) { e.stopPropagation(); act('item/bgChange', { id: sel, slide: Number(un.dataset.unbg), media: null }); return; }
     const b = e.target.closest('[data-slide]');
     if (b && sel) act('live/go', { itemId: sel, slide: Number(b.dataset.slide) });
+  });
+  $('grid').addEventListener('keydown', (e) => {
+    const b = e.target.closest('[data-slide]');
+    if (b && (e.key === 'Enter') && sel) { e.preventDefault(); act('live/go', { itemId: sel, slide: Number(b.dataset.slide) }); }
+  });
+  // Drop a background (from the media library or the Inputs panel) on a slide:
+  // it is used from that slide onward, until the next slide with a dropped background.
+  $('grid').addEventListener('dragover', (e) => {
+    const b = e.target.closest('[data-slide]');
+    if (!b || !e.dataTransfer.types.includes('application/x-lectern-bg')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    document.querySelectorAll('.slide.drop-bg').forEach((x) => x !== b && x.classList.remove('drop-bg'));
+    b.classList.add('drop-bg');
+  });
+  $('grid').addEventListener('dragleave', (e) => { const b = e.target.closest('[data-slide]'); if (b && !b.contains(e.relatedTarget)) b.classList.remove('drop-bg'); });
+  $('grid').addEventListener('drop', (e) => {
+    const b = e.target.closest('[data-slide]');
+    const media = e.dataTransfer.getData('application/x-lectern-bg');
+    document.querySelectorAll('.slide.drop-bg').forEach((x) => x.classList.remove('drop-bg'));
+    if (!b || !media || !sel) return;
+    e.preventDefault();
+    const it = findItem(sel);
+    const n = Number(b.dataset.slide);
+    act('item/bgChange', { id: sel, slide: n, media }).then(() => toast('Background “' + mediaLabel(media) + '” from slide ' + (n + 1) + ' of “' + titleOf(it) + '” on'));
   });
   $('itemBg').addEventListener('change', (e) => { if (sel) act('item/update', { id: sel, patch: { background: e.target.value || null } }); });
   $('editItem').addEventListener('click', () => editItem(findItem(sel)));
@@ -351,19 +389,45 @@
   // ---------- library: media ----------
   function renderMedia() {
     const all = PRESETS.map(([v, l]) => ({ v, l })).concat(st.media.map((m) => ({ v: m, l: m })));
+    const key = JSON.stringify([all, st.settings.defaultBackground, st.service.mediaOptions]);
+    if ($('mediaGrid').dataset.key === key) return;
+    $('mediaGrid').dataset.key = key;
+    const opts = st.service.mediaOptions || {};
     $('mediaGrid').innerHTML = all.map(({ v, l }) =>
-      '<button class="mthumb' + (v === st.settings.defaultBackground ? ' default' : '') + '" data-media="' + esc(v) + '" title="' + esc(l) + '">' +
-      R.mediaHTML(v, { still: true }) + '<span>' + esc(l.replace(/^preset:/, '')) + '</span></button>').join('');
+      '<button class="mthumb' + (v === st.settings.defaultBackground ? ' default' : '') + '" data-media="' + esc(v) + '" draggable="true" title="' + esc(l) + ' · drag onto a slide">' +
+      R.mediaHTML(v, { still: true }) + (opts[v] && opts[v].speed !== 1 ? '<b class="speed">' + opts[v].speed + '×</b>' : '') + '<span>' + esc(l.replace(/^preset:/, '')) + '</span></button>').join('');
   }
+  $('mediaGrid').addEventListener('dragstart', (e) => {
+    const b = e.target.closest('[data-media]');
+    if (!b) return;
+    e.dataTransfer.setData('application/x-lectern-bg', b.dataset.media);
+    e.dataTransfer.effectAllowed = 'copy';
+  });
   $('mediaGrid').addEventListener('click', (e) => {
     const b = e.target.closest('[data-media]');
     if (!b) return;
     const name = b.dataset.media;
     const it = findItem(sel);
     const isPreset = name.startsWith('preset:');
+    const video = R.isVideo(name);
+    const o = (st.service.mediaOptions || {})[name] || {};
+    const speed = Number(o.speed) || 1;
+    const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
     openDialog({
       title: name.replace(/^preset:/, ''),
-      body: '<div class="frame" style="border-radius:6px"><div>' + R.mediaHTML(name, { muted: true }) + '</div></div>',
+      body: '<div class="frame" style="border-radius:6px"><div>' + R.mediaHTML(name, { muted: true }) + '</div></div>' +
+        (video ? '<div class="section-title">Playback</div><div class="fields">' +
+          '<label class="field"><span>Speed</span><select id="mdSpeed">' + SPEEDS.map((x) => '<option value="' + x + '"' + (x === speed ? ' selected' : '') + '>' + (x === 1 ? '100% (normal)' : Math.round(x * 100) + '%') + '</option>').join('') +
+          (SPEEDS.includes(speed) ? '' : '<option value="' + speed + '" selected>' + Math.round(speed * 100) + '%</option>') + '</select></label>' +
+          '<label class="field"><span>Sound</span><select id="mdAudio"><option value="follow"' + (o.audioFollow !== false ? ' selected' : '') + '>Follows the video speed</option><option value="normal"' + (o.audioFollow === false ? ' selected' : '') + '>Stays at 100%</option></select>' +
+          '<small>Keeping the sound at 100% suits videos without speech. It can drift from the picture.</small></label>' +
+          '</div><div class="row"><button class="btn small ghost" id="mdReset">Reset to 100%</button><span class="hint">Saved with the service. Changes apply straight away, even while the video is live.</span></div>' : ''),
+      onOpen: video ? (body) => {
+        const save = () => act('media/options', { name, speed: Number(body.querySelector('#mdSpeed').value), audioFollow: body.querySelector('#mdAudio').value !== 'normal' });
+        body.querySelector('#mdSpeed').addEventListener('change', save);
+        body.querySelector('#mdAudio').addEventListener('change', save);
+        body.querySelector('#mdReset').addEventListener('click', () => { body.querySelector('#mdSpeed').value = '1'; body.querySelector('#mdAudio').value = 'follow'; save(); });
+      } : undefined,
       buttons: [
         ...(!isPreset ? [{ label: 'Delete', cls: 'danger', onClick: () => act('media/remove', { name }) }] : []),
         { label: 'Use as service default', cls: 'ghost', onClick: () => act('settings/update', { patch: { defaultBackground: name } }) },
@@ -393,6 +457,8 @@
     else if (t === 'announce') { const id = await addItem({ type: 'announce', text: 'Welcome\nWe are glad you are here' }); if (id) editItem(findItem(id)); }
     else if (t === 'countdown') { const id = await addItem({ type: 'countdown', label: 'Service begins in', target: '10:30' }); if (id) editItem(findItem(id)); }
     else if (t === 'media') pickMedia((name) => addItem({ type: 'media', media: name }));
+    else if (t === 'pptx') importPowerPoint();
+    else if (t === 'input') pickInputItem();
     else if (t === 'blank') addItem({ type: 'blank' });
   });
 
@@ -437,7 +503,236 @@
     if (it.type === 'countdown') return editCountdown(it);
     if (it.type === 'scripture') return editScripture(it);
     if (it.type === 'media') return pickMedia((name) => act('item/update', { id: it.id, patch: { media: name } }));
+    if (it.type === 'deck') return editDeck(it);
+    if (it.type === 'input') return pickInputItem(it);
   }
+
+  function editDeck(it) {
+    openDialog({
+      title: 'PowerPoint slides',
+      body: '<label class="field"><span>Name in service order</span><input id="dkTitle" value="' + esc(it.title || '') + '"></label>' +
+        '<p class="hint">' + (it.slides || []).length + ' slides imported as pictures. Their images are in the media library. Drag a background onto a slide to change it; pictures cover the background.</p>',
+      buttons: [{ label: 'Cancel', cls: 'ghost' }, { label: 'Save', cls: 'primary', onClick: () => act('item/update', { id: it.id, patch: { title: val('dkTitle').trim() || it.title } }) }],
+    });
+  }
+
+  // ---------- PowerPoint ----------
+  async function importPowerPoint(file) {
+    if (!file) file = await act('pptx/pick');
+    if (!file) return;
+    const name = file.split(/[\\/]/).pop();
+    openDialog({
+      title: 'Import “' + name + '”',
+      body: '<p>How should the slides come in?</p>' +
+        '<div class="fields"><div class="out"><b>As text slides</b><span class="hint">Each slide’s heading and text become editable Lectern slides, styled with your text boxes and presets.</span></div>' +
+        '<div class="out"><b>As pictures</b><span class="hint">Each slide becomes an image that looks exactly like the original. Needs PowerPoint (Windows) or the free LibreOffice.</span></div></div>',
+      buttons: [
+        { label: 'Cancel', cls: 'ghost' },
+        { label: 'As pictures', cls: 'ghost', onClick: () => { runImport(file, 'pictures'); } },
+        { label: 'As text slides', cls: 'primary', onClick: () => { runImport(file, 'text'); } },
+      ],
+    });
+  }
+  async function runImport(file, mode) {
+    toast(mode === 'pictures' ? 'Turning the slides into pictures…' : 'Reading the slides…');
+    const r = await act('pptx/import', { path: file, mode, after: sel || undefined });
+    if (r) { sel = r.id; renderAll(); toast('Imported ' + r.slides + ' slide' + (r.slides === 1 ? '' : 's')); }
+  }
+
+  // Drop files from the desktop on the service order: PowerPoint files are imported,
+  // images and videos are added to the media library and the service.
+  $('order').addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    $('order').classList.add('file-over');
+  });
+  $('order').addEventListener('dragleave', (e) => { if (!$('order').contains(e.relatedTarget)) $('order').classList.remove('file-over'); });
+  $('order').addEventListener('drop', async (e) => {
+    if (!e.dataTransfer.files.length) return;
+    e.preventDefault();
+    $('order').classList.remove('file-over');
+    const paths = Array.from(e.dataTransfer.files).map((f) => api.pathForFile(f)).filter(Boolean);
+    const decks = paths.filter((p) => /\.pptx?$/i.test(p));
+    const media = paths.filter((p) => /\.(png|jpe?g|gif|webp|bmp|mp4|mov|m4v|webm|mkv)$/i.test(p));
+    if (media.length) {
+      const added = await act('media/import', { paths: media });
+      for (const m of added || []) await addItem({ type: 'media', media: m });
+    }
+    if (decks.length) importPowerPoint(decks[0]);
+    if (!decks.length && !media.length) toast('Drop PowerPoint files, images or videos here.', true);
+  });
+
+  // ---------- NDI inputs ----------
+  const inputSurfaces = new Map();
+  function renderInputs() {
+    const list = st.settings.inputs || [];
+    const status = (st.status.inputs && st.status.inputs.inputs) || {};
+    const box = $('inputs');
+    const key = JSON.stringify(list.map((x) => [x.id, x.name, x.source]));
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      inputSurfaces.clear();
+      box.innerHTML = list.length ? list.map((x) =>
+        '<div class="inp" data-inp="' + esc(x.id) + '">' +
+        '<div class="frame" draggable="true" title="Drag onto a slide to use as its background"><div>' + R.mediaHTML('input:' + x.id) + '</div></div>' +
+        '<div class="inp-body"><div class="inp-name"></div><div class="inp-src"></div>' +
+        '<div class="inp-row"><button class="btn small" data-inbg>Background</button><button class="btn small" data-infull>Full screen</button><button class="btn small ghost" data-inmore aria-label="Input options">⋯</button></div>' +
+        '<div class="inp-row"><button class="toggle" data-inaudio aria-pressed="false" title="Play this input’s audio">Audio</button>' +
+        '<input type="range" min="0" max="2" step="0.05" data-invol aria-label="Input volume"><span class="inp-vol"></span></div></div></div>').join('')
+        : '<div class="empty">No NDI inputs yet. Use + NDI input to add a camera, a computer or any other NDI source on the network.' +
+          (st.status.inputs && st.status.inputs.error ? '<br><span class="hint">' + esc(st.status.inputs.error) + '</span>' : '') + '</div>';
+    }
+    list.forEach((x) => {
+      const card = box.querySelector('[data-inp="' + CSS.escape(x.id) + '"]');
+      if (!card) return;
+      const s2 = status[x.id] || {};
+      card.querySelector('.inp-name').textContent = x.name;
+      const ndiErr = st.status.inputs && st.status.inputs.error;
+      const stateText = s2.state === 'live' ? '● ' + s2.w + '×' + s2.h + ' ' + s2.fps + ' fps'
+        : s2.state === 'error' ? 'Error: ' + (s2.error || '')
+          : s2.state === 'no signal' ? 'No signal'
+            : !s2.state && ndiErr ? 'NDI runtime not found' : 'Connecting…';
+      card.querySelector('.inp-src').textContent = stateText + ' · ' + x.source;
+      card.querySelector('.inp-src').title = !s2.state && ndiErr ? ndiErr : x.source;
+      const a = card.querySelector('[data-inaudio]');
+      a.setAttribute('aria-pressed', String(!!x.audio));
+      const vol = card.querySelector('[data-invol]');
+      if (document.activeElement !== vol) vol.value = x.volume == null ? 1 : x.volume;
+      card.querySelector('.inp-vol').textContent = Math.round((x.volume == null ? 1 : x.volume) * 100) + '%';
+    });
+    R.Surface && window.LecternInputHub.refresh();
+  }
+  $('inputs').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-inp]');
+    if (!card) return;
+    const id = card.dataset.inp;
+    const x = (st.settings.inputs || []).find((i) => i.id === id);
+    if (!x) return;
+    if (e.target.closest('[data-inaudio]')) act('input/update', { id, patch: { audio: !x.audio } });
+    else if (e.target.closest('[data-inbg]')) {
+      const it = findItem(sel);
+      if (!it) { toast('Select an item first, or drag the input onto a slide.', true); return; }
+      act('item/update', { id: it.id, patch: { background: 'input:' + id } }).then(() => toast('“' + x.name + '” is the background for “' + titleOf(it) + '”'));
+    } else if (e.target.closest('[data-infull]')) {
+      addItem({ type: 'input', input: id }).then((newId) => newId && act('live/go', { itemId: newId, slide: 0 }));
+    } else if (e.target.closest('[data-inmore]')) editInput(x);
+  });
+  $('inputs').addEventListener('input', (e) => {
+    const v = e.target.closest('[data-invol]');
+    if (!v) return;
+    const id = e.target.closest('[data-inp]').dataset.inp;
+    e.target.closest('[data-inp]').querySelector('.inp-vol').textContent = Math.round(Number(v.value) * 100) + '%';
+    clearTimeout(v._t);
+    v._t = setTimeout(() => act('input/update', { id, patch: { volume: Number(v.value) } }), 120);
+  });
+  $('inputs').addEventListener('dragstart', (e) => {
+    const card = e.target.closest('[data-inp]');
+    if (!card) return;
+    e.dataTransfer.setData('application/x-lectern-bg', 'input:' + card.dataset.inp);
+    e.dataTransfer.effectAllowed = 'copy';
+  });
+  function editInput(x) {
+    openDialog({
+      title: 'NDI input',
+      body: '<div class="fields"><label class="field"><span>Name</span><input id="inName" value="' + esc(x.name) + '"></label>' +
+        '<label class="field"><span>NDI source</span><input id="inSrc" value="' + esc(x.source) + '" list="inSources"><datalist id="inSources">' +
+        ((st.status.inputs && st.status.inputs.sources) || []).map((s2) => '<option value="' + esc(s2) + '">').join('') + '</datalist></label></div>' +
+        '<p class="hint">Audio plays through the audio device chosen in Settings → Audio, with its own on/off and volume here, whether or not the input is on screen.</p>',
+      buttons: [
+        { label: 'Remove input', cls: 'danger', onClick: () => act('input/remove', { id: x.id }) },
+        { label: 'Cancel', cls: 'ghost' },
+        { label: 'Save', cls: 'primary', onClick: () => act('input/update', { id: x.id, patch: { name: val('inName').trim() || x.name, source: val('inSrc').trim() || x.source } }) },
+      ],
+    });
+  }
+  function addInputDialog(then) {
+    act('input/discover');
+    openDialog({
+      title: 'Add an NDI input',
+      body: '<p class="hint">NDI sources found on the network. New sources appear here as they are found.</p><ul class="songlist" id="srcList" style="max-height:320px"></ul>' +
+        '<label class="field"><span>Or type a source name</span><input id="srcName" placeholder="COMPUTER (Camera 1)"></label>',
+      buttons: [{ label: 'Cancel', cls: 'ghost' }, { label: 'Add', cls: 'primary', onClick: async () => { const n = val('srcName').trim(); if (!n) return false; const id = await act('input/add', { source: n }); if (id && then) then(id); } }],
+      onOpen: (body) => {
+        const draw = () => {
+          const srcs = (st.status.inputs && st.status.inputs.sources) || [];
+          const used = new Set((st.settings.inputs || []).map((x) => x.source));
+          const err = st.status.inputs && st.status.inputs.error;
+          body.querySelector('#srcList').innerHTML = srcs.length ? srcs.map((s2) => '<li><span class="s-t">' + esc(s2) + (used.has(s2) ? ' <span class="s-a">added</span>' : '') + '</span><button class="btn small primary" data-src="' + esc(s2) + '">Add</button></li>').join('')
+            : '<li class="empty">' + (err ? esc(err) : 'Looking for NDI sources…') + '</li>';
+        };
+        draw();
+        const t = setInterval(draw, 1000);
+        body.addEventListener('click', async (e) => {
+          const b = e.target.closest('[data-src]');
+          if (!b) return;
+          closeDialog();
+          const id = await act('input/add', { source: b.dataset.src });
+          if (id) { window.LecternLayout.expand('inputs'); if (then) then(id); }
+        });
+        return () => clearInterval(t);
+      },
+    });
+  }
+  $('addInput').addEventListener('click', () => addInputDialog());
+  function pickInputItem(it) {
+    const list = st.settings.inputs || [];
+    if (!list.length) { addInputDialog((id) => (it ? act('item/update', { id: it.id, patch: { input: id } }) : addItem({ type: 'input', input: id }))); return; }
+    openDialog({
+      title: it ? 'Change NDI input' : 'Add an NDI input to the service',
+      body: '<ul class="songlist">' + list.map((x) => '<li><span class="s-t">' + esc(x.name) + ' <span class="s-a">' + esc(x.source) + '</span></span><button class="btn small primary" data-pi="' + esc(x.id) + '">' + (it ? 'Use' : 'Add') + '</button></li>').join('') + '</ul>',
+      buttons: [{ label: 'New input…', cls: 'ghost', onClick: () => { setTimeout(() => addInputDialog((id) => (it ? act('item/update', { id: it.id, patch: { input: id } }) : addItem({ type: 'input', input: id }))), 0); } }, { label: 'Cancel' }],
+      onOpen: (body) => body.addEventListener('click', (e) => { const b = e.target.closest('[data-pi]'); if (!b) return; closeDialog(); if (it) act('item/update', { id: it.id, patch: { input: b.dataset.pi } }); else addItem({ type: 'input', input: b.dataset.pi }); }),
+    });
+  }
+
+  // ---------- Claude chat panel ----------
+  function chatLine(cls, text, done) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg ' + cls;
+    el.textContent = text;
+    if (done && done.length) { const d2 = document.createElement('div'); d2.className = 'done'; d2.textContent = done.map((x) => '✓ ' + x).join('\n'); el.appendChild(d2); }
+    $('chatLog').appendChild(el);
+    $('chatLog').scrollTop = $('chatLog').scrollHeight;
+    return el;
+  }
+  function chatIntro() {
+    $('chatLog').innerHTML = '';
+    chatLine('ai', st && st.claude && st.claude.hasKey
+      ? 'Ask me to change things in Lectern, such as text size, fonts, backgrounds, importing files or building the service order. I’ll ask before each change, and you can undo it.'
+      : 'To chat with Claude here, add your Anthropic API key in Settings → Claude. You can also connect the Claude desktop app from the same place.');
+  }
+  $('chatForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = $('chatText').value.trim();
+    if (!text) return;
+    $('chatText').value = '';
+    chatLine('me', text);
+    $('chatSend').disabled = true;
+    const wait = chatLine('step', 'Thinking…');
+    try {
+      const r = await api.action('chat/send', { text });
+      wait.remove();
+      chatLine('ai', r.text, r.done);
+    } catch (err) {
+      wait.remove();
+      chatLine('err', err.message);
+    } finally {
+      $('chatSend').disabled = false;
+      $('chatText').focus();
+    }
+  });
+  $('chatText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('chatForm').requestSubmit(); } });
+  $('chatReset').addEventListener('click', () => { act('chat/reset'); chatIntro(); });
+  $('chatUndo').addEventListener('click', async () => { const label = await act('claude/undo'); if (label) { chatLine('step', 'Undone: ' + label); toast('Undone: ' + label); } });
+
+  api.onEvent((ev) => {
+    if (ev.type === 'chat/step') {
+      const last = $('chatLog').lastElementChild;
+      if (last && last.classList.contains('step')) last.textContent = ev.text; else chatLine('step', ev.text);
+    } else if (ev.type === 'pptx/import') importPowerPoint();
+    else if (ev.type === 'layout/reset') window.LecternLayout.reset();
+    else if (ev.type === 'toast') toast(ev.text);
+  });
 
   function slidePreviewList(slides) {
     return slides.map((s, i) => '<div class="out" style="padding:6px"><div class="out-top"><span class="pill" style="background:' + s.color + ';color:#fff">' + esc(s.group) + '</span><span class="out-num">' + (i + 1) + '</span></div>' +
@@ -561,6 +856,7 @@
         '<label class="check"><input type="checkbox" id="oProps"' + (o.showProps ? ' checked' : '') + '> Show props (logo)</label>' +
         '<label class="check"><input type="checkbox" id="oMsg"' + (o.showMessages ? ' checked' : '') + '> Show audience messages</label>' +
         '<label class="check"><input type="checkbox" id="oAudio"' + (o.audio ? ' checked' : '') + '> Play video audio from this output</label>' +
+        '<label class="field"><span>Audio device for this output</span><select id="oDev"><option value="">System default</option></select><small>Choose Dante Via (or another Dante device) to send this output’s sound to Dante.</small></label>' +
         '</div>' +
         (s.error ? '<p class="hint" style="color:#ff8a8d">' + esc(s.error) + '</p>' : '') +
         '<p class="hint">Changing the look picks sensible defaults for transparency and layers. Changing resolution, frame rate, name or transparency restarts the NDI source.</p>',
@@ -571,10 +867,12 @@
           const patch = { name: val('oName').trim() || o.name, width: w, height: h, fps: val('oFps'), fontScale: Number(val('oScale')), ndi: val('oNdi'), groups: val('oGroups').trim(), display: val('oDisp') || null, enabled: true };
           if (look !== o.look) patch.look = look;
           else Object.assign(patch, { alpha: val('oAlpha'), showProps: val('oProps'), showMessages: val('oMsg'), audio: val('oAudio') });
+          patch.audioDevice = val('oDev') || '';
           await act('output/update', { index: i, patch });
         },
       }],
       onOpen: (body) => {
+        fillAudioDevices(body.querySelector('#oDev'), o.audioDevice || '');
         body.querySelector('#oLook').addEventListener('change', (e) => {
           const d = { main: [0, 1, 1], lowerthird: [1, 0, 1], lyrics: [1, 0, 0], stage: [0, 0, 0], lobby: [0, 1, 0], clean: [0, 1, 0] }[e.target.value];
           body.querySelector('#oAlpha').checked = !!d[0]; body.querySelector('#oProps').checked = !!d[1]; body.querySelector('#oMsg').checked = !!d[2];
@@ -615,11 +913,28 @@
         '<label class="field"><span>PIN</span><input id="stPin" value="' + esc(s.remotePin) + '"></label>' +
         '</div>' +
         (remote ? '<p class="hint">' + (remote.error ? esc(remote.error) : 'Open ' + remote.urls.map(esc).join(' or ') + ' on a phone on the same network.') + '</p>' : '') +
+        '<div class="section-title">Audio</div><div class="fields">' +
+        '<label class="field"><span>Audio device for NDI inputs</span><select id="stDev"><option value="">System default</option></select><small>Choose Dante Via to send input audio to Dante. Each output has its own audio device in its ⚙ settings.</small></label>' +
+        '</div>' +
+        '<div class="section-title">Claude</div>' +
+        '<div class="fields">' +
+        '<label class="check"><input type="checkbox" id="stMcp"' + (st.claude.mcpEnabled ? ' checked' : '') + '> Let the Claude desktop app on this computer control Lectern</label>' +
+        '<div class="field"><span>Claude desktop app setup</span><div class="row"><button class="btn small" id="stMcpCopy">Copy setup for Claude app</button></div>' +
+        '<small>In the Claude desktop app, open Settings → Developer → Edit Config, paste this into claude_desktop_config.json (merge it with anything already there), save, and restart the Claude app. Lectern must be open.</small></div>' +
+        '</div><div class="fields">' +
+        '<label class="field"><span>Anthropic API key for the chat panel</span><input id="stKey" type="password" autocomplete="off" placeholder="' + (st.claude.hasKey ? 'Saved. Type a new key to replace it.' : 'sk-ant-…') + '">' +
+        '<small>Stored encrypted on this computer. Usage is billed to your Anthropic account. Get a key at console.anthropic.com.</small></label>' +
+        (st.claude.hasKey ? '<div class="field"><span>&nbsp;</span><div class="row"><button class="btn small ghost" id="stKeyDel">Remove saved key</button></div></div>' : '') +
+        '</div>' +
         '<div class="section-title">CCLI usage</div>' +
         '<div class="row"><span class="hint">' + st.usageCount + ' song uses recorded.</span><button class="btn small" id="stExport">Export CSV…</button><button class="btn small ghost" id="stClear">Clear</button></div>',
       buttons: [{ label: 'Cancel', cls: 'ghost' }, {
-        label: 'Save', cls: 'primary', onClick: () => act('settings/update', {
+        label: 'Save', cls: 'primary', onClick: async () => {
+          if (val('stKey').trim()) await act('claude/setKey', { key: val('stKey').trim() });
+          if (val('stMcp') !== st.claude.mcpEnabled) await act('claude/mcp', { enabled: val('stMcp') });
+          return act('settings/update', {
           patch: {
+            audioDevice: val('stDev') || '',
             defaultBackground: val('stBg') || null,
             theme: { fontFamily: val('stFont'), textColor: val('stColor'), uppercase: val('stUpper'), shadow: val('stShadow') },
             transitionMs: Number(val('stTrans')) || 0,
@@ -630,15 +945,42 @@
             ...(val('stRemote') !== s.remoteEnabled || Number(val('stPort')) !== s.remotePort || val('stPin') !== s.remotePin
               ? { remoteEnabled: val('stRemote'), remotePort: Number(val('stPort')) || 8650, remotePin: val('stPin').trim() || s.remotePin } : {}),
           },
-        }),
+        });
+        },
       }],
       onOpen: (body) => {
+        fillAudioDevices(body.querySelector('#stDev'), s.audioDevice || '');
+        body.querySelector('#stMcpCopy').addEventListener('click', async () => { if (await act('claude/copyConfig')) toast('Setup copied. Paste it into the Claude app’s config file.'); });
+        const del = body.querySelector('#stKeyDel');
+        if (del) del.addEventListener('click', async () => { await act('claude/setKey', { key: '' }); toast('API key removed'); del.disabled = true; });
         body.querySelector('#stExport').addEventListener('click', () => act('usage/export'));
         body.querySelector('#stClear').addEventListener('click', () => act('usage/clear'));
       },
     });
   }
   $('openSettings').addEventListener('click', openSettings);
+
+  // Audio output devices (Dante Via shows up here like any other sound device).
+  async function fillAudioDevices(select, current) {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+      devs.forEach((d, i) => {
+        const o = document.createElement('option');
+        o.value = d.deviceId; o.textContent = d.label || 'Audio device ' + (i + 1);
+        if (d.deviceId === current) o.selected = true;
+        select.appendChild(o);
+      });
+      if (current && !devs.some((d) => d.deviceId === current)) {
+        const o = document.createElement('option'); o.value = current; o.textContent = 'Saved device (not connected)'; o.selected = true; select.appendChild(o);
+      }
+    } catch { /* devices unavailable */ }
+  }
+
+  $('textLayoutBtn').addEventListener('click', () => window.LecternEditors && window.LecternEditors.textLayout(findItem(sel)));
+  window.LecternControl = {
+    get st() { return st; }, get sel() { return sel; },
+    act, openDialog, closeDialog, toast, findItem, titleOf, slidesOf, val,
+  };
 
   // ---------- top bar & tools ----------
   document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => act(b.dataset.act)));
@@ -694,6 +1036,10 @@
     renderOutputs();
     renderSongs();
     renderMedia();
+    renderInputs();
+    $('chatUndo').disabled = !(st.claude && st.claude.canUndo);
+    $('chatUndo').title = st.claude && st.claude.canUndo ? 'Undo: ' + st.claude.canUndo : 'Nothing to undo';
+    $('textLayoutBtn').disabled = !findItem(sel);
   }
 
   let lastLive = null;
@@ -707,5 +1053,6 @@
   });
 
   buildOutputs();
-  api.action('state/get').then((s) => { st = s; lastLive = s.live.itemId; renderAll(); });
+  window.LecternInputHub.attach(window.lecternInput);
+  api.action('state/get').then((s) => { st = s; lastLive = s.live.itemId; renderAll(); chatIntro(); });
 })();

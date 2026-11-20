@@ -9,10 +9,11 @@
 
   function mediaHTML(name, { muted = true, still = false } = {}) {
     if (!name) return '';
+    if (name.startsWith('input:')) return '<canvas class="in-canvas" data-input="' + esc(name.slice(6)) + '" width="16" height="9"></canvas>';
     if (name.startsWith('preset:')) return '<div class="bg-preset bg-' + esc(name.slice(7)) + (still ? ' still' : '') + '"></div>';
     if (isVideo(name)) {
       if (still) return '<video src="' + mediaUrl(name) + '#t=1" muted preload="metadata"></video>';
-      return '<video src="' + mediaUrl(name) + '" autoplay loop playsinline' + (muted ? ' muted' : '') + '></video>';
+      return '<video src="' + mediaUrl(name) + '" data-name="' + esc(name) + '" autoplay loop playsinline' + (muted ? ' muted' : '') + '></video>';
     }
     return '<img src="' + mediaUrl(name) + '" alt="">';
   }
@@ -35,8 +36,42 @@
   }
   const clockText = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 
-  function slideHTML(slide, mode) {
+  // Text boxes from a text layout (see LecternSlides.defaultLayout). Sizes are % of the frame
+  // and text size is in % of frame height, so previews and outputs match.
+  function boxContent(slide, role, box) {
+    switch (role) {
+      case 'text':
+        if (slide.kind === 'lyric') return nl2br(slide.text);
+        if (slide.kind === 'scripture') return '<span class="s-scr-in">' + slide.text + '</span>';
+        if (slide.kind === 'announce') return esc(slide.title);
+        return '';
+      case 'secondary':
+        if (slide.kind === 'scripture') return esc(slide.ref);
+        if (slide.kind === 'announce') return nl2br(slide.body || '');
+        return '';
+      case 'footer': return esc(slide.footer || '');
+      case 'custom': return nl2br(box.text || '');
+      default: return '';
+    }
+  }
+  function layoutHTML(slide, layout) {
+    return (layout.boxes || []).map((b) => {
+      const html = boxContent(slide, b.role, b);
+      if (!html) return '';
+      const st = 'left:' + (+b.x || 0) + '%;top:' + (+b.y || 0) + '%;width:' + (+b.w || 10) + '%;height:' + (+b.h || 10) + '%;' +
+        '--bs:' + (+b.size || 5) + ';text-align:' + (b.align || 'center') + ';justify-content:' + ({ top: 'flex-start', bottom: 'flex-end' }[b.valign] || 'safe center') + ';' +
+        (b.font ? 'font-family:' + esc(b.font).replace(/;/g, '') + ';' : '') + (b.color ? 'color:' + esc(b.color).replace(/;/g, '') + ';' : '') +
+        'font-weight:' + (b.bold === false ? 500 : 700) + ';' + (b.italic ? 'font-style:italic;' : '') + (b.opacity != null ? 'opacity:' + (+b.opacity) + ';' : '') +
+        (b.upper ? 'text-transform:uppercase;' : '');
+      return '<div class="tb tb-' + esc(b.role) + '" data-fit style="' + st + '"><div>' + html + '</div></div>';
+    }).join('');
+  }
+
+  function slideHTML(slide, mode, layout) {
     if (!slide) return '';
+    if (layout && (mode === 'full' || mode === 'key') && (slide.kind === 'lyric' || slide.kind === 'scripture' || slide.kind === 'announce')) {
+      return '<div class="tbs">' + layoutHTML(slide, layout) + '</div>';
+    }
     const footer = mode === 'full' && slide.footer ? '<div class="s-footer">' + esc(slide.footer) + '</div>' : '';
     switch (slide.kind) {
       case 'lyric':
@@ -157,9 +192,9 @@
       } else {
         let html = '';
         if (L.slide && rs.slide && look !== 'stage' && look !== 'clean') {
-          html = slideHTML(rs.slide, look === 'lowerthird' ? 'band' : look === 'lyrics' ? 'key' : 'full');
+          html = slideHTML(rs.slide, look === 'lowerthird' ? 'band' : look === 'lyrics' ? 'key' : 'full', rs.textLayout);
         }
-        this.setLayer('slide', look + ':' + (cfg.fontScale || 1) + ':' + (L.slide ? rs.slideKey : 'off') + ':' + JSON.stringify(th), html, true);
+        this.setLayer('slide', look + ':' + (cfg.fontScale || 1) + ':' + (L.slide ? rs.slideKey : 'off') + ':' + JSON.stringify(th) + ':' + JSON.stringify(rs.textLayout || null), html, true);
       }
 
       const props = cfg.showProps && L.props ? propHTML(rs.prop) : '';
@@ -170,6 +205,36 @@
 
       const stage = look === 'stage' ? stageHTML(rs) : '';
       this.setLayer('stage', 's:' + stage.replace(/data-clock>[^<]*/, '').replace(/data-timer[^>]*>[^<]*/, ''), stage, false);
+      this.applyMedia();
+      if (window.LecternInputHub) window.LecternInputHub.refresh();
+    }
+
+    // Playback speed and audio device for the videos on this surface. Applied in place so a
+    // speed change takes effect without restarting the video.
+    applyMedia() {
+      const opts = (this.rs && this.rs.mediaOptions) || {};
+      const sink = (this.cfg && this.cfg.audioDevice) || '';
+      this.root.querySelectorAll('video[data-name]').forEach((v) => {
+        const o = opts[v.dataset.name] || {};
+        const speed = Math.max(0.25, Math.min(4, Number(o.speed) || 1));
+        if (v.playbackRate !== speed) v.playbackRate = speed;
+        const wantsAudio = !v.hasAttribute('muted') && !this.preview;
+        // "Audio stays at 100%": the video plays muted at its speed and a companion
+        // audio element plays the same file at normal speed.
+        const split = wantsAudio && speed !== 1 && o.audioFollow === false;
+        v.muted = !wantsAudio || split;
+        let comp = v.nextElementSibling && v.nextElementSibling.matches('audio[data-companion]') ? v.nextElementSibling : null;
+        if (split && !comp) {
+          comp = document.createElement('audio');
+          comp.dataset.companion = '1';
+          comp.src = v.src; comp.loop = true; comp.autoplay = true;
+          comp.currentTime = v.currentTime / speed;
+          v.after(comp);
+        } else if (!split && comp) { comp.pause(); comp.remove(); comp = null; }
+        for (const el of [v, comp]) {
+          if (el && el.setSinkId && (el.sinkId || '') !== sink && wantsAudio) el.setSinkId(sink).catch(() => {});
+        }
+      });
     }
 
     tickLobby() {
@@ -181,7 +246,7 @@
       const key = 'lobby:' + idx + ':' + n + ':' + JSON.stringify(rs.theme) + (n ? JSON.stringify(list[idx]) : '');
       if (key === this.lobbyKey) return;
       this.lobbyKey = key;
-      this.setLayer('slide', key, n ? slideHTML(list[idx], 'full') : '', true);
+      this.setLayer('slide', key, n ? slideHTML(list[idx], 'full', rs.textLayout) : '', true);
     }
 
     tick() {
@@ -196,5 +261,34 @@
     }
   }
 
-  window.LecternRender = { Surface, esc, nl2br, fmtDur, untilTime, timerRemaining, mediaHTML, mediaUrl, isVideo };
+    // NDI input frames arrive through the window's preload and are drawn onto every canvas
+  // showing that input. Output windows get full frames; the control window gets previews.
+  const InputHub = {
+    bridge: null,
+    wanted: '',
+    attach(bridge) {
+      this.bridge = bridge;
+      bridge.onFrame((f) => this.draw(f));
+      this.refresh();
+    },
+    refresh() {
+      if (!this.bridge) return;
+      const ids = Array.from(new Set(Array.from(document.querySelectorAll('canvas[data-input]')).map((c) => c.dataset.input))).sort();
+      const key = ids.join(',');
+      if (key !== this.wanted) { this.wanted = key; this.bridge.want(ids); }
+    },
+    draw(f) {
+      const list = document.querySelectorAll('canvas[data-input="' + CSS.escape(String(f.id)) + '"]');
+      if (!list.length) return;
+      const data = f.data instanceof Uint8ClampedArray ? f.data : new Uint8ClampedArray(f.data.buffer || f.data, f.data.byteOffset || 0, f.w * f.h * 4);
+      const img = new ImageData(data, f.w, f.h);
+      list.forEach((c) => {
+        if (c.width !== f.w || c.height !== f.h) { c.width = f.w; c.height = f.h; }
+        c.getContext('2d').putImageData(img, 0, 0);
+      });
+    },
+  };
+  window.LecternInputHub = InputHub;
+
+  window.LecternRender = { Surface, esc, nl2br, fmtDur, untilTime, timerRemaining, mediaHTML, mediaUrl, isVideo, layoutHTML, slideHTML };
 })();

@@ -6,10 +6,10 @@ Worship presentation software for Windows and macOS with **six independent outpu
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 (64-bit) | `Lectern-Setup-1.1.1.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
-| Windows (portable) | `Lectern-1.1.1-win.zip` | Unzip anywhere and run `Lectern.exe`. |
-| Mac (Apple Silicon and Intel) | `Lectern-1.1.1-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
-| Mac (zip) | `Lectern-1.1.1-universal-mac.zip` | Same app as the DMG, zipped. |
+| Windows 10/11 (64-bit) | `Lectern-Setup-1.1.2.exe` | Installer with Start menu and desktop shortcuts, `.lectern` file association and a firewall rule. Not code-signed, so SmartScreen will warn: choose **More info → Run anyway**. |
+| Windows (portable) | `Lectern-1.1.2-win.zip` | Unzip anywhere and run `Lectern.exe`. |
+| Mac (Apple Silicon and Intel) | `Lectern-1.1.2-universal.dmg` | One universal app for every Mac. See "First run on a Mac" below. |
+| Mac (zip) | `Lectern-1.1.2-universal-mac.zip` | Same app as the DMG, zipped. |
 
 **NDI:** install the free [NDI Tools](https://ndi.video/tools/) (or the NDI 6 Runtime) on the presentation computer. Lectern finds the NDI library automatically. If it is somewhere unusual, set its location under Settings → NDI. Without NDI, screen outputs and previews still work, and a banner explains what's missing.
 
@@ -128,8 +128,8 @@ npm start
 
 - Windows installer, on Windows: `npm run dist:win`.
 - Universal, signed DMG, on a Mac: `npm run dist:mac`. Set `CSC_LINK`/`CSC_KEY_PASSWORD` to sign, and `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` to notarize.
-- Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.1.1.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
-- CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`. To publish them, type a release tag (for example `v1.1.1`) in **Release tag** when you start the run: the installers are attached to that release, which is created if it doesn't exist. Pushing a `v*` tag does the same for that tag.
+- Cross-building from Linux (no Wine): `npx electron-builder --win zip -c.win.signAndEditExecutable=false`, then `makensis -DVERSION=1.0.0 -DSRCDIR=../dist/win-unpacked -DOUTFILE=../dist/Lectern-Setup-1.1.2.exe build/standalone-installer.nsi` run from the `build` folder. For Mac: `node build/package-mac.js`.
+- CI: `.github/workflows/build.yml` builds both platforms on GitHub's Windows and macOS runners when you push a `v*` tag or run the **Build** workflow from the Actions tab. The files are attached to the run as `lectern-Windows` and `lectern-macOS`. To publish them, type a release tag (for example `v1.1.2`) in **Release tag** when you start the run: the installers are attached to that release, which is created if it doesn't exist. Pushing a `v*` tag does the same for that tag.
 
 ### NDI loopback test
 

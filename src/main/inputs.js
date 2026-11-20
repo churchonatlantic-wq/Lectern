@@ -4,6 +4,7 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 const ndi = require('./ndi');
+const log = require('./log');
 
 class InputReceiver {
   constructor(manager, cfg) {
@@ -15,7 +16,8 @@ class InputReceiver {
       workerData: { source: cfg.source, libPath: manager.getSettings().ndiRuntimePath || undefined, recvName: 'Lectern ' + cfg.name, ctrl: this.ctrl.buffer },
     });
     this.worker.on('message', (msg) => this.onMessage(msg));
-    this.worker.on('error', (e) => { this.status = { ...this.status, state: 'error', error: String(e && e.message || e) }; this.m.statusChanged(); });
+    this.worker.on('error', (e) => { log.error('NDI input "' + cfg.source + '" worker error:', e); this.status = { ...this.status, state: 'error', error: String(e && e.message || e) }; this.m.statusChanged(); });
+    this.worker.on('exit', (code) => { if (code) log.warn('NDI input "' + cfg.source + '" worker exited with code ' + code); });
     this.applyFlags();
   }
   onMessage(msg) {
@@ -69,7 +71,7 @@ class InputManager {
         this.error = null;
         if (list.join('\n') !== this.sources.join('\n')) { this.sources = list; this.statusChanged(); }
       } catch (e) {
-        if (this.error !== e.message) { this.error = e.message; this.statusChanged(); }
+        if (this.error !== e.message) { this.error = e.message; log.warn('NDI source discovery: ' + e.message); this.statusChanged(); }
       }
     };
     poll();

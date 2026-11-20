@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, screen, Menu, shell, session, safeStorage, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, screen, Menu, shell, session, safeStorage, clipboard, crashReporter } = require('electron');
+const log = require('./log');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -23,6 +24,16 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 if (process.env.LECTERN_USER_DATA) app.setPath('userData', process.env.LECTERN_USER_DATA);
+
+// Crash records: native crash dumps stay on this computer (nothing is uploaded), and errors
+// and crashes are written to <data folder>/logs/lectern.log.
+crashReporter.start({ uploadToServer: false });
+log.init(path.join(app.getPath('userData'), 'logs'));
+log.info('Lectern ' + app.getVersion() + ' starting on ' + process.platform + ' ' + process.arch + ' (' + require('os').release() + '), Electron ' + process.versions.electron);
+process.on('uncaughtException', (e) => log.error('Uncaught error in main process:', e));
+process.on('unhandledRejection', (e) => log.error('Unhandled promise rejection in main process:', e instanceof Error ? e : String(e)));
+app.on('render-process-gone', (_e, wc, details) => log.error('A window stopped (' + details.reason + ', exit code ' + details.exitCode + '): ' + (wc && !wc.isDestroyed() ? wc.getURL().replace(/^.*\/renderer\//, '') : 'unknown')));
+app.on('child-process-gone', (_e, details) => log.error('Helper process stopped: ' + details.type + ' (' + details.reason + ', exit code ' + details.exitCode + ')' + (details.name ? ' ' + details.name : '')));
 
 let store, outputs, remote, control, inputs, audioWin, bridge, chat;
 const runtime = {
@@ -574,8 +585,10 @@ function probeNdi() {
   try {
     const l = ndi.load(store.data.settings.ndiRuntimePath || undefined);
     runtime.status.ndi = { ok: true, version: l.version, path: l.libPath };
+    log.info('NDI runtime ' + l.version + ' at ' + l.libPath);
   } catch (e) {
     runtime.status.ndi = { ok: false, error: e.message };
+    log.warn('NDI runtime not available: ' + e.message);
   }
 }
 
@@ -632,6 +645,8 @@ function buildMenu() {
       role: 'help', submenu: [
         { label: 'Get the NDI Runtime / NDI Tools', click: () => shell.openExternal('https://ndi.video/tools/') },
         { label: 'Open Data Folder', click: () => shell.openPath(app.getPath('userData')) },
+        { label: 'Open Log Folder', click: () => shell.openPath(log.dir() || app.getPath('userData')) },
+        { label: 'Open Crash Reports Folder', click: () => shell.openPath(app.getPath('crashDumps')) },
       ],
     },
   ];
@@ -644,6 +659,14 @@ function createControl() {
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'control-preload.js'), contextIsolation: true, backgroundThrottling: false },
   });
   control.loadFile(path.join(__dirname, '..', 'renderer', 'control.html'));
+  control.webContents.on('console-message', (_e, level, message, line, source) => {
+    if (level >= 3) log.error('Control window: ' + message + ' (' + String(source || '').replace(/^.*\/renderer\//, '') + ':' + line + ')');
+  });
+  // If the control window's page crashes, reload it instead of leaving a blank window.
+  control.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit') return;
+    setTimeout(() => { if (control && !control.isDestroyed()) control.reload(); }, 1000);
+  });
   control.on('close', async (e) => {
     if (runtime.dirty && !control.forceClose) {
       e.preventDefault();
@@ -714,7 +737,7 @@ app.whenReady().then(async () => {
   chat = new Chat({ bridge, getKey: getClaudeKey });
 
   ipcMain.handle('action', async (_e, { type, payload }) => {
-    try { return { ok: true, value: await dispatch(type, payload) }; } catch (e) { return { ok: false, error: e.message }; }
+    try { return { ok: true, value: await dispatch(type, payload) }; } catch (e) { log.warn('Action ' + type + ' failed: ' + e.message); return { ok: false, error: e.message }; }
   });
   ipcMain.handle('output/init', () => {
     const st = fullState();
@@ -765,6 +788,7 @@ app.on('open-file', (e, file) => { e.preventDefault(); if (store) dispatch('serv
 let quitting = false;
 app.on('before-quit', async (e) => {
   if (quitting) return;
+  log.info('Lectern quitting');
   e.preventDefault();
   quitting = true;
   try { store && store.flush(); } catch { /* ignore */ }

@@ -2,6 +2,7 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 const { EventEmitter } = require('events');
+const log = require('./log');
 
 const FPS = {
   '23.976': [24000, 1001], '24': [24, 1], '25': [25, 1], '29.97': [30000, 1001], '30': [30, 1],
@@ -28,11 +29,13 @@ class NdiSender extends EventEmitter {
     this.worker.on('message', (m) => {
       if (m.type === 'ready') Object.assign(this.status, { state: 'sending', error: null, version: m.version });
       else if (m.type === 'status') Object.assign(this.status, { connections: m.connections, tally: m.tally });
-      else if (m.type === 'error') Object.assign(this.status, { state: 'error', error: m.message, code: m.code });
+      else if (m.type === 'error') { Object.assign(this.status, { state: 'error', error: m.message, code: m.code }); log.warn('NDI output "' + name + '": ' + m.message); }
       else if (m.type === 'stopped') this.status.state = 'stopped';
       this.emit('status', this.status);
     });
+    this.worker.on('exit', (code) => { if (code) log.warn('NDI output "' + name + '" worker exited with code ' + code); });
     this.worker.on('error', (e) => {
+      log.error('NDI output "' + name + '" worker error:', e);
       Object.assign(this.status, { state: 'error', error: String(e && e.message || e) });
       this.emit('status', this.status);
     });
